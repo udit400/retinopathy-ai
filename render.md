@@ -88,19 +88,15 @@ Our approach followed a systematic pipeline of experimentation, failure analysis
 ```mermaid
 flowchart TD
     A([Problem Identification]) --> B[Literature Review]
-    B --> C[Initial Experiments<br/>Multi-class + Pre-trained Models]
+    B --> C[Initial Experiments Multi-class + Pre-trained Models]
     C --> D{Challenge Analysis}
-    D -->|Severe Class Imbalance| E[Reformulate to Binary<br/>(DR vs No_DR)]
+    D -->|Severe Class Imbalance| E[Reformulate to Binary]
     D -->|Model Complexity Overkill| F[Design Custom Lightweight CNN]
     E --> G[Balanced Dataset Selection]
     F --> G
     G --> H[Training & Validation]
     H --> I[Performance Evaluation]
     I --> J([Final Deployment Solution])
-    
-    style C fill:#f9d5e5,stroke:#333,stroke-width:2px
-    style F fill:#e1f7d5,stroke:#333,stroke-width:2px
-    style J fill:#d5e1f7,stroke:#333,stroke-width:2px
 
 ```
 
@@ -142,9 +138,6 @@ graph TD
     end
 
     In --> C1
-    
-    style Feature_Extraction fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
-    style Classification fill:#ffebee,stroke:#f44336,stroke-width:2px
 
 ```
 
@@ -250,11 +243,6 @@ graph LR
     Model -->|Compatible| Edge[Raspberry Pi<br/>Edge Devices]
     Model -->|Compatible| Laptop[Standard Laptop<br/>No GPU Req]
     Model -->|Compatible| Cloud[Serverless Cloud<br/>Low Cost]
-    
-    style Mobile fill:#b2dfdb,stroke:#009688
-    style Edge fill:#b2dfdb,stroke:#009688
-    style Laptop fill:#b2dfdb,stroke:#009688
-    style Cloud fill:#b2dfdb,stroke:#009688
 
 ```
 
