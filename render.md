@@ -10,10 +10,10 @@
 ---
 
 ## Project Video Link
-**Video Demonstration:** [Link to be added]
+**Video Demonstration:** [Link to Video Demonstration](https://youtu.be/6N7XtLHWI6U)
 
 ## GitHub Repository Link
-**Project Code:** [https://github.com/Talnz007/retinopathy-ai/](https://github.com/Talnz007/retinopathy-ai/)
+**Project Code:** [Repo Link](https://github.com/Talnz007/retinopathy-ai/)
 
 ---
 
