@@ -8,13 +8,17 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 import io
-import os
+import os 
 import time
 from typing import List
 import uvicorn
 import onnxruntime as ort
 from PIL import Image
 import torchvision.transforms as transforms
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+MODEL_PATH = os.path.join(BASE_DIR, "retinopathy_model.onnx")
 
 app = FastAPI(
     title="Diabetic Retinopathy Classification API",
@@ -31,7 +35,7 @@ app.add_middleware(
 )
 
 try:
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 except Exception:
     print("Warning: Static directory not found")
 
@@ -46,26 +50,16 @@ def load_onnx_model():
     global onnx_session, model_loaded
     
     try:
-        # Try to find the model file
-        possible_paths = ["retinopathy_model.onnx"]
-        
-        model_path = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                model_path = path
-                break
-        
-        if not model_path:
-            print(f"ERROR: No ONNX model file found!")
+        if not os.path.exists(MODEL_PATH):
+            print(f"ERROR: No ONNX model file found at: {MODEL_PATH}")
             print(f"Current directory: {os.getcwd()}")
-            print(f"Files in directory: {os.listdir('.')}")
-            print(f"Looking for: {possible_paths}")
+            print(f"Files in directory: {os.listdir('.')}" )
             return
         
-        print(f"Loading ONNX model from: {model_path}")
+        print(f"Loading ONNX model from: {MODEL_PATH}")
         
         # Create inference session with ONNX runtime
-        onnx_session = ort.InferenceSession(model_path)
+        onnx_session = ort.InferenceSession(MODEL_PATH)
         
         model_loaded = True
         print("ONNX model loaded and ready!")
@@ -115,7 +109,7 @@ async def startup_event():
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     try:
-        with open("static/index.html", "r") as f:
+        with open(os.path.join(STATIC_DIR, "index.html"), "r") as f:
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse(content="""
@@ -162,27 +156,26 @@ async def predict_retinopathy(file: UploadFile = File(...)):
         
         outputs = onnx_session.run([output_name], {input_name: image_array})[0]
         
-        # Convert log_softmax to probabilities
-        probabilities = np.exp(outputs)
-        predicted_class = np.argmax(probabilities, axis=1)[0]
-        confidence = probabilities[0][predicted_class]
+        # Convert logits to probabilities using softmax (more stable than exp alone)
+        exp_outputs = np.exp(outputs - np.max(outputs, axis=1, keepdims=True))
+        probabilities = exp_outputs / np.sum(exp_outputs, axis=1, keepdims=True)
         
-        severity_levels = {
-            0: "Positive diagnosis. Retinal abnormalities consistent with Diabetic Retinopathy were detected.",
-            1: "Negative diagnosis. No clear signs of Diabetic Retinopathy were detected in the analysis."
-        }
+        predicted_class = int(np.argmax(probabilities, axis=1)[0])
+        confidence = float(probabilities[0][predicted_class])
+        
+        severity_text = get_severity_text(predicted_class, confidence)
         
         results = {
-            "predicted_class": int(predicted_class),
+            "predicted_class": predicted_class,
             "predicted_class_name": class_names[predicted_class],
-            "confidence": round(float(confidence) * 100, 2),
+            "confidence": round(confidence * 100, 2),
             "all_probabilities": {
                 class_names[i]: round(float(probabilities[0][i]) * 100, 2)
                 for i in range(len(class_names))
             },
-            "diagnosis": get_diagnosis(predicted_class),
-            "recommendations": get_recommendations(predicted_class),
-            "severity_level": severity_levels.get(int(predicted_class), "Assessment not available.")
+            "diagnosis": get_diagnosis(predicted_class, confidence),
+            "recommendations": get_recommendations(predicted_class, confidence),
+            "severity_level": severity_text
         }
         
         return results
@@ -191,33 +184,72 @@ async def predict_retinopathy(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
-def get_diagnosis(class_idx: int) -> str:
-    diagnoses = {
-        0: "Diabetic Retinopathy Detected",
-        1: "No Diabetic Retinopathy Detected"
-    }
-    return diagnoses.get(class_idx, "Unknown")
+def get_diagnosis(class_idx: int, confidence: float) -> str:
+    if class_idx == 0:
+        if confidence >= 0.85:
+            return "Diabetic Retinopathy Detected (high confidence)"
+        elif confidence >= 0.65:
+            return "Diabetic Retinopathy Detected (moderate confidence)"
+        else:
+            return "Possible Diabetic Retinopathy (low confidence)"
+
+    if class_idx == 1:
+        if confidence >= 0.85:
+            return "No Diabetic Retinopathy Detected (high confidence)"
+        elif confidence >= 0.65:
+            return "No Diabetic Retinopathy Detected (moderate confidence)"
+        else:
+            return "Negative result but low confidence"
+
+    return "Unknown"
 
 
-def get_recommendations(class_idx: int) -> List[str]:
-    recommendations = {
-        0: [
-            "⚠️ Diabetic retinopathy detected - Seek medical attention",
-            "Schedule an appointment with an ophthalmologist immediately",
-            "Maintain strict blood sugar control",
-            "Monitor blood pressure and cholesterol levels",
-            "Follow up regularly for progression monitoring"
-        ],
-        1: [
-            "✓ No signs of diabetic retinopathy detected",
-            "Continue regular eye exams as recommended",
-            "Maintain good blood sugar control",
-            "Keep managing diabetes effectively",
-            "Schedule annual diabetic eye examination"
+def get_recommendations(class_idx: int, confidence: float) -> List[str]:
+    if class_idx == 0:
+        recs = [
+            "Diabetic retinopathy detected — please seek medical attention soon",
+            "Schedule an appointment with an ophthalmologist within the next 1-2 weeks",
+            "Control blood sugar (HbA1c) through diet and medication",
+            "Monitor blood pressure and lipid levels closely",
+            "Keep a log of vision changes and share with your doctor"
         ]
-    }
-    return recommendations.get(class_idx, ["Consult with healthcare provider"])
+        if confidence < 0.70:
+            recs.insert(1, "Consider repeating the scan or getting a second opinion for confirmation")
+        if confidence >= 0.90:
+            recs.append("Discuss treatment options such as laser therapy or anti-VEGF injections with your specialist")
+        return recs
 
+    if class_idx == 1:
+        recs = [
+            "No signs of diabetic retinopathy detected",
+            "Continue regular eye exams as recommended by your doctor",
+            "Maintain stable blood sugar control (HbA1c targets) and healthy lifestyle",
+            "Stay consistent with medication and follow up screenings",
+            "Report any sudden vision changes to your healthcare provider immediately"
+        ]
+        if confidence < 0.70:
+            recs.insert(1, "While the result is reassuring, consider repeating the scan in 3-6 months")
+        return recs
+
+    return ["Consult with your healthcare provider for personalized advice"]
+
+
+def get_severity_text(class_idx: int, confidence: float) -> str:
+    if class_idx == 0:
+        if confidence >= 0.90:
+            return "High probability of diabetic retinopathy - prompt medical evaluation recommended."
+        if confidence >= 0.70:
+            return "Moderate probability of diabetic retinopathy - follow up with a specialist."
+        return "Low probability but still recommend follow-up and re-check in a short interval."
+
+    if class_idx == 1:
+        if confidence >= 0.90:
+            return "Low probability of diabetic retinopathy - continue regular monitoring."
+        if confidence >= 0.70:
+            return "Moderate confidence in a negative result; repeat screening as recommended."
+        return "Result has low confidence; consider a follow-up exam."
+
+    return "Assessment not available."
 
 @app.get("/model-info")
 async def get_model_info():

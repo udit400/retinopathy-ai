@@ -5,8 +5,8 @@ opencv-python
 numpy
 python-multipart
 typing-extensions
-torch==2.8.0+cpu
+torch==2.9.0+cpu
 torchvision
-onnxruntime==1.23.1
+onnxruntime==1.24.3
 
 --extra-index-url https://download.pytorch.org/whl/cpu
