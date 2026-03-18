@@ -2,6 +2,8 @@
 FastAPI Backend for Diabetic Retinopathy Classification using ONNX Runtime
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -20,10 +22,23 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 MODEL_PATH = os.path.join(BASE_DIR, "retinopathy_model.onnx")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("=" * 60)
+    print("Starting Diabetic Retinopathy Classification API (ONNX)")
+    print("=" * 60)
+    load_onnx_model()
+    print("=" * 60)
+    yield
+    print("Shutting down Diabetic Retinopathy Classification API")
+
+
 app = FastAPI(
     title="Diabetic Retinopathy Classification API",
     description="CNN-based retinal image analysis (DR vs No_DR) using ONNX Runtime",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -97,13 +112,6 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
         raise HTTPException(status_code=400, detail=f"Image preprocessing failed: {str(e)}")
 
 
-@app.on_event("startup")
-async def startup_event():
-    print("=" * 60)
-    print("Starting Diabetic Retinopathy Classification API (ONNX)")
-    print("=" * 60)
-    load_onnx_model()
-    print("=" * 60)
 
 
 @app.get("/", response_class=HTMLResponse)
