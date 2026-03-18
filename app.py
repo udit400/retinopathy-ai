@@ -4,19 +4,23 @@ FastAPI Backend for Diabetic Retinopathy Classification using ONNX Runtime
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import numpy as np
 import io
 import os 
 import time
-from typing import List
+import hashlib
+import secrets
+from typing import List, Optional, Dict
 import uvicorn
 import onnxruntime as ort
 from PIL import Image
 import torchvision.transforms as transforms
+from pydantic import BaseModel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -26,17 +30,19 @@ MODEL_PATH = os.path.join(BASE_DIR, "retinopathy_model.onnx")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("=" * 60)
-    print("Starting Diabetic Retinopathy Classification API (ONNX)")
+    print("Starting MediSight Health (Retinal Diagnostic Suite)")
     print("=" * 60)
+    _load_users()
+    _create_default_user()
     load_onnx_model()
     print("=" * 60)
     yield
-    print("Shutting down Diabetic Retinopathy Classification API")
+    print("Shutting down MediSight Health")
 
 
 app = FastAPI(
-    title="Diabetic Retinopathy Classification API",
-    description="CNN-based retinal image analysis (DR vs No_DR) using ONNX Runtime",
+    title="MediSight Health - Retinal Diagnostic API",
+    description="AI-powered retinal image analysis for diabetic retinopathy screening (ONNX Runtime)",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -58,6 +64,30 @@ except Exception:
 onnx_session = None
 model_loaded = False
 class_names = ["DR", "No_DR"]  # 0=DR, 1=No_DR
+
+# Simple user/auth and payment simulation (demo purposes only)
+USERS_FILE = os.path.join(BASE_DIR, "users.json")
+users: Dict[str, dict] = {}
+sessions: Dict[str, str] = {}  # token -> username
+security = HTTPBearer()
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    full_name: Optional[str] = None
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class PaymentRequest(BaseModel):
+    amount: float
+    currency: str = "USD"
+    plan: Optional[str] = None
 
 
 def load_onnx_model():
@@ -84,6 +114,63 @@ def load_onnx_model():
         import traceback
         print(traceback.format_exc())
         model_loaded = False
+
+
+def _hash_password(password: str, salt: Optional[str] = None) -> str:
+    if salt is None:
+        salt = secrets.token_hex(16)
+    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return f"{salt}${digest}"
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        salt, digest = stored_hash.split("$", 1)
+    except ValueError:
+        return False
+    return _hash_password(password, salt) == stored_hash
+
+
+def _load_users() -> None:
+    global users
+    if os.path.exists(USERS_FILE):
+        try:
+            import json
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                users = json.load(f) or {}
+        except Exception:
+            users = {}
+    else:
+        users = {}
+
+
+def _save_users() -> None:
+    try:
+        import json
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=2)
+    except Exception:
+        pass
+
+
+def _create_default_user() -> None:
+    if "demo" not in users:
+        users["demo"] = {
+            "username": "demo",
+            "full_name": "Demo User",
+            "password": _hash_password("demo123"),
+            "created_at": time.time(),
+        }
+        _save_users()
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    token = credentials.credentials
+    username = sessions.get(token)
+    if not username or username not in users:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    return users[username]
 
 
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
@@ -122,15 +209,75 @@ async def read_root():
     except FileNotFoundError:
         return HTMLResponse(content="""
         <html>
-            <head><title>Diabetic Retinopathy API</title></head>
+            <head><title>MediSight Health API</title></head>
             <body style="font-family: Arial; padding: 40px; text-align: center;">
-                <h1>Diabetic Retinopathy Classification API (ONNX)</h1>
-                <p>Binary Classification: DR vs No_DR</p>
+                <h1>MediSight Health - Retinal Diagnostic API</h1>
+                <p>AI-powered retinal image analysis (Diabetic Retinopathy Screening)</p>
                 <p>API is running! Visit <a href="/docs">/docs</a> for documentation.</p>
                 <p><a href="/health">Check Health Status</a></p>
             </body>
         </html>
         """)
+
+
+@app.post("/register", response_model=TokenResponse)
+async def register(user: UserCreate):
+    if user.username in users:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    users[user.username] = {
+        "username": user.username,
+        "full_name": user.full_name or user.username,
+        "password": _hash_password(user.password),
+        "created_at": time.time(),
+    }
+    _save_users()
+
+    token = secrets.token_urlsafe(32)
+    sessions[token] = user.username
+    return TokenResponse(access_token=token)
+
+
+@app.post("/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    user = users.get(credentials.username)
+    if not user or not _verify_password(credentials.password, user.get("password", "")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+
+    token = secrets.token_urlsafe(32)
+    sessions[token] = user["username"]
+    return TokenResponse(access_token=token)
+
+
+@app.post("/logout")
+async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    sessions.pop(token, None)
+    return JSONResponse({"detail": "Logged out"})
+
+
+@app.get("/me")
+async def me(current_user: dict = Depends(get_current_user)):
+    return {
+        "username": current_user["username"],
+        "full_name": current_user.get("full_name"),
+    }
+
+
+@app.post("/payment")
+async def create_payment(request: PaymentRequest, current_user: dict = Depends(get_current_user)):
+    if request.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+
+    transaction_id = secrets.token_hex(12)
+    return {
+        "status": "success",
+        "transaction_id": transaction_id,
+        "amount": request.amount,
+        "currency": request.currency,
+        "plan": request.plan or "standard",
+        "message": f"Payment processed successfully for {current_user.get('full_name')}.",
+    }
 
 
 @app.get("/health")
@@ -147,7 +294,10 @@ async def health_check():
 
 
 @app.post("/predict")
-async def predict_retinopathy(file: UploadFile = File(...)):
+async def predict_retinopathy(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
     if not model_loaded:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
@@ -215,7 +365,7 @@ def get_diagnosis(class_idx: int, confidence: float) -> str:
 def get_recommendations(class_idx: int, confidence: float) -> List[str]:
     if class_idx == 0:
         recs = [
-            "Diabetic retinopathy detected — please seek medical attention soon",
+            "Diabetic retinopathy detected - please seek medical attention soon",
             "Schedule an appointment with an ophthalmologist within the next 1-2 weeks",
             "Control blood sugar (HbA1c) through diet and medication",
             "Monitor blood pressure and lipid levels closely",
