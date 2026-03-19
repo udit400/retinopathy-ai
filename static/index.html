@@ -4,8 +4,45 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Diabetic Retinopathy AI Classifier</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
+        .fas {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.2em;
+            font-style: normal;
+            line-height: 1;
+        }
+
+        .fas::before {
+            display: inline-block;
+        }
+
+        .fa-eye::before { content: '👁'; }
+        .fa-heartbeat::before { content: '💓'; }
+        .fa-sign-in-alt::before { content: '↪'; }
+        .fa-user-md::before,
+        .fa-user-doctor::before { content: '🩺'; }
+        .fa-user::before { content: '👤'; }
+        .fa-user-plus::before { content: '➕'; }
+        .fa-key::before { content: '🔑'; }
+        .fa-check-circle::before { content: '✅'; }
+        .fa-exclamation-circle::before { content: '⚠'; }
+        .fa-id-card::before { content: '🪪'; }
+        .fa-phone::before { content: '📞'; }
+        .fa-paper-plane::before { content: '📤'; }
+        .fa-inbox::before { content: '📥'; }
+        .fa-calendar::before,
+        .fa-calendar-days::before,
+        .fa-calendar-check::before { content: '📅'; }
+        .fa-stethoscope::before { content: '🩺'; }
+        .fa-bell::before { content: '🔔'; }
+        .fa-money-bill-wave::before { content: '💵'; }
+        .fa-building::before { content: '🏥'; }
+        .fa-envelope-open-text::before { content: '✉'; }
+        .fa-comments::before { content: '💬'; }
+        .fa-file-medical::before { content: '📄'; }
+
         :root {
             --deep-twilight: #03045eff;
             --bright-teal-blue: #0077b6ff;
@@ -1023,23 +1060,23 @@
                             </div>
                             <div class="input-group">
                                 <label for="drDept">Department</label>
-                                <input id="drDept" type="text" placeholder="e.g. Ophthalmology" required>
+                                <input id="drDept" type="text" autocomplete="organization-title" placeholder="e.g. Ophthalmology" required>
                             </div>
                             <div class="input-group">
                                 <label for="drMobile">Mobile Number</label>
                                 <div class="otp-row">
-                                    <input id="drMobile" type="tel" placeholder="+91XXXXXXXXXX" required>
+                                    <input id="drMobile" type="tel" autocomplete="tel" placeholder="+91XXXXXXXXXX" required>
                                     <button type="button" id="sendOtpDrBtn" class="otp-btn">Send OTP</button>
                                 </div>
                             </div>
                             <div class="input-group hidden" id="drOtpGroup">
                                 <label for="drOtp">Enter OTP</label>
-                                <input id="drOtp" type="text" maxlength="6" placeholder="6-digit OTP">
+                                <input id="drOtp" type="text" autocomplete="one-time-code" maxlength="6" placeholder="6-digit OTP">
                                 <span id="drOtpHint" class="otp-hint"></span>
                             </div>
                             <div class="input-group">
                                 <label for="drPassword">Password</label>
-                                <input id="drPassword" type="password" required>
+                                <input id="drPassword" type="password" autocomplete="new-password" required>
                             </div>
                             <button type="submit" class="submit-btn">
                                 <i class="fas fa-user-plus"></i> Register as Doctor
@@ -1057,18 +1094,18 @@
                             <div class="input-group">
                                 <label for="ptMobile">Mobile Number</label>
                                 <div class="otp-row">
-                                    <input id="ptMobile" type="tel" placeholder="+91XXXXXXXXXX" required>
+                                    <input id="ptMobile" type="tel" autocomplete="tel" placeholder="+91XXXXXXXXXX" required>
                                     <button type="button" id="sendOtpPtBtn" class="otp-btn">Send OTP</button>
                                 </div>
                             </div>
                             <div class="input-group hidden" id="ptOtpGroup">
                                 <label for="ptOtp">Enter OTP</label>
-                                <input id="ptOtp" type="text" maxlength="6" placeholder="6-digit OTP">
+                                <input id="ptOtp" type="text" autocomplete="one-time-code" maxlength="6" placeholder="6-digit OTP">
                                 <span id="ptOtpHint" class="otp-hint"></span>
                             </div>
                             <div class="input-group">
                                 <label for="ptPassword">Password</label>
-                                <input id="ptPassword" type="password" required>
+                                <input id="ptPassword" type="password" autocomplete="new-password" required>
                             </div>
                             <button type="submit" class="submit-btn">
                                 <i class="fas fa-user-plus"></i> Register as Patient
@@ -1084,18 +1121,18 @@
                         <div class="input-group">
                             <label for="forgotMobile">Registered Mobile Number</label>
                             <div class="otp-row">
-                                <input id="forgotMobile" type="tel" placeholder="+91XXXXXXXXXX" required>
+                                <input id="forgotMobile" type="tel" autocomplete="tel" placeholder="+91XXXXXXXXXX" required>
                                 <button type="button" id="sendOtpForgotBtn" class="otp-btn">Send OTP</button>
                             </div>
                         </div>
                         <div class="input-group hidden" id="forgotOtpGroup">
                             <label for="forgotOtp">Enter OTP</label>
-                            <input id="forgotOtp" type="text" maxlength="6" placeholder="6-digit OTP">
+                            <input id="forgotOtp" type="text" autocomplete="one-time-code" maxlength="6" placeholder="6-digit OTP">
                             <span id="forgotOtpHint" class="otp-hint"></span>
                         </div>
                         <div class="input-group">
                             <label for="forgotNewPwd">New Password</label>
-                            <input id="forgotNewPwd" type="password" required>
+                            <input id="forgotNewPwd" type="password" autocomplete="new-password" required>
                         </div>
                         <button type="submit" class="submit-btn">
                             <i class="fas fa-key"></i> Reset Password

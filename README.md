@@ -40,15 +40,16 @@ This project automates the detection process by classifying retinal images into 
 
 retinopathy-ai/
 │
-├── backend/
-│   ├── app.py                  # FastAPI backend serving ONNX model
-│   ├── retinopathy_model.onnx  # Exported model for inference
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── index.html              # Simple UI for image upload and prediction
-│   └── images/                 # Sample test images
-│
+├── app.py                      # FastAPI backend serving the ONNX model and UI
+├── retinopathy_model.onnx      # Exported model for inference
+├── requirements.txt            # Python dependencies
+├── static/
+│   ├── index.html              # Browser UI served by FastAPI
+│   ├── app.js                  # Frontend logic
+│   ├── style.css               # Shared styles
+│   └── images/                 # Sample retinal images
+├── tests/
+│   └── test_dashboards.py      # Existing unit tests
 ├── diagnosis-of-diabetic-retinopathy-by-pytorch.ipynb  # Model training notebook
 └── README.md
 
@@ -76,21 +77,28 @@ retinopathy-ai/
 
 ```bash
 # Clone the repository
-git clone https://github.com/Talnz007/retinopathy-ai.git
-cd retinopathy-ai/backend
+git clone https://github.com/udit400/retinopathy-ai.git
+cd retinopathy-ai
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Run backend
+# Run the app
 uvicorn app:app --reload
 ````
 
-Then open `frontend/index.html` in your browser.
-Set the API endpoint in the script to:
+Then open:
 
 ```
-http://127.0.0.1:8000/predict
+http://127.0.0.1:8000/
+```
+
+The FastAPI backend serves the browser UI and the prediction endpoints from the same process.
+
+### Run tests
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
 ---

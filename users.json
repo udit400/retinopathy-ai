@@ -3,31 +3,81 @@
     "username": "demo",
     "full_name": "Demo User",
     "password": "aa7bed6c04d3954c8d85f1ad3ddcc1da$1ef861929ccbd5c2df1426f62354346701ee27edbd6c60e2fdeb6ea33f5dde80",
-    "created_at": 1773824123.9797177
+    "created_at": 1773824123.9797177,
+    "user_id": "demo",
+    "name": "Demo User",
+    "role": "doctor",
+    "mobile": "",
+    "profile_image": "",
+    "fees": 1.0,
+    "department": "General",
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   },
   "inuse54@gmail.com": {
     "username": "inuse54@gmail.com",
     "full_name": "use",
     "password": "5346fd457851d132cb2feb50b31e2747$be53a6afc554c2e1c81bdfa71bf438355b94ae66873fe84e318c18a7809b4ccd",
-    "created_at": 1773824193.693711
+    "created_at": 1773824193.693711,
+    "user_id": "inuse54@gmail.com",
+    "name": "use",
+    "role": "doctor",
+    "mobile": "",
+    "profile_image": "",
+    "fees": 1.0,
+    "department": "General",
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   },
   "test_1773866230": {
     "username": "test_1773866230",
     "full_name": "Test User",
     "password": "aad8c4b8a34adb913bf1741145ddcd9f$27c28aded031c3d264db6268307db0bc940b6da94582c4bced0f3c930bfca5f4",
-    "created_at": 1773866230.84898
+    "created_at": 1773866230.84898,
+    "user_id": "test_1773866230",
+    "name": "Test User",
+    "role": "doctor",
+    "mobile": "",
+    "profile_image": "",
+    "fees": 1.0,
+    "department": "General",
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   },
   "test_1773866322": {
     "username": "test_1773866322",
     "full_name": "Test User",
     "password": "12ef35ff72d8132f3ac6b380d74b6ade$2282cae8bca3a874305328af099dfe29ac715da8dd088cbc9b6ecc7cc6f8c2dc",
-    "created_at": 1773866322.1432576
+    "created_at": 1773866322.1432576,
+    "user_id": "test_1773866322",
+    "name": "Test User",
+    "role": "doctor",
+    "mobile": "",
+    "profile_image": "",
+    "fees": 1.0,
+    "department": "General",
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   },
   "Udit": {
     "username": "Udit",
     "full_name": "udit",
     "password": "1b2a5d4486da822f764de6e67971f1d0$706cf0854e2166418c7b2e02939eb0fc1e4b62cf88574a9822e072d2992957a9",
-    "created_at": 1773868888.8741496
+    "created_at": 1773868888.8741496,
+    "user_id": "Udit",
+    "name": "udit",
+    "role": "doctor",
+    "mobile": "",
+    "profile_image": "",
+    "fees": 1.0,
+    "department": "General",
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   },
   "558662": {
     "user_id": "558662",
@@ -37,7 +87,12 @@
     "mobile": "+919876543210",
     "password": "4e59523856d87cf4ab5d4ee5a8a4e0c2$d81872dc35c724024a7301d8b0490eb17a59091e1eff785593492523a09c6df0",
     "created_at": 1773890283.9573648,
-    "department": "Ophthalmology"
+    "department": "Ophthalmology",
+    "profile_image": "",
+    "fees": 1.0,
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   },
   "438304": {
     "user_id": "438304",
@@ -46,6 +101,25 @@
     "full_name": "Test Patient",
     "mobile": "+911234567890",
     "password": "f30d9b96047e23ed751c87bcb0ab6291$6263b95e956c4469647777961e7acc541d53d573792bcedece6c44b29c98dfc7",
-    "created_at": 1773890291.492526
+    "created_at": 1773890291.492526,
+    "profile_image": "",
+    "doctor_reports": [],
+    "appointments": [],
+    "important_reports": []
+  },
+  "708903": {
+    "user_id": "708903",
+    "role": "doctor",
+    "name": "Dr. Verify",
+    "full_name": "Dr. Verify",
+    "mobile": "+919999999999",
+    "password": "153dbc5d002cedeebdda959ac2dd846f$743bc072020f5f54627f07b51b58ac24f010639717f8b2580f5c6cd82083fea3",
+    "created_at": 1773899280.3931956,
+    "department": "Retina",
+    "fees": 1.0,
+    "profile_image": "",
+    "patient_submissions": [],
+    "doctor_messages": [],
+    "appointments": []
   }
 }
