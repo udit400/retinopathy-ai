@@ -28,5 +28,24 @@
     "full_name": "udit",
     "password": "1b2a5d4486da822f764de6e67971f1d0$706cf0854e2166418c7b2e02939eb0fc1e4b62cf88574a9822e072d2992957a9",
     "created_at": 1773868888.8741496
+  },
+  "558662": {
+    "user_id": "558662",
+    "role": "doctor",
+    "name": "Dr. Test",
+    "full_name": "Dr. Test",
+    "mobile": "+919876543210",
+    "password": "4e59523856d87cf4ab5d4ee5a8a4e0c2$d81872dc35c724024a7301d8b0490eb17a59091e1eff785593492523a09c6df0",
+    "created_at": 1773890283.9573648,
+    "department": "Ophthalmology"
+  },
+  "438304": {
+    "user_id": "438304",
+    "role": "patient",
+    "name": "Test Patient",
+    "full_name": "Test Patient",
+    "mobile": "+911234567890",
+    "password": "f30d9b96047e23ed751c87bcb0ab6291$6263b95e956c4469647777961e7acc541d53d573792bcedece6c44b29c98dfc7",
+    "created_at": 1773890291.492526
   }
 }

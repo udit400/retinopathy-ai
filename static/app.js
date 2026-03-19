@@ -2,6 +2,8 @@
 
 const STORAGE_KEY = 'mediSightToken';
 const API_BASE = window.location.origin;
+const MIN_MOBILE_LENGTH = 7;
+const OTP_COUNTDOWN_SECONDS = 300; // 5 minutes
 
 const globalLoader = document.getElementById('globalLoader');
 const globalLoaderText = document.getElementById('globalLoaderText');
@@ -17,27 +19,26 @@ function hideGlobalLoader() {
     globalLoader.classList.add('hidden');
 }
 
-const authSection = document.getElementById('authSection');
-const appSection = document.getElementById('appSection');
-const dashboardSection = document.getElementById('dashboardSection') || appSection;
-const userBadge = document.getElementById('userBadge');
-const userNameEl = document.getElementById('userName');
-const logoutBtn = document.getElementById('logoutBtn');
-const authError = document.getElementById('authError');
-const authHint = document.getElementById('authHint');
-const authRegisterHint = document.getElementById('authRegisterHint');
+const authSection    = document.getElementById('authSection');
+const appSection     = document.getElementById('appSection');
+const patientSection = document.getElementById('patientSection');
+const userBadge      = document.getElementById('userBadge');
+const userNameEl     = document.getElementById('userName');
+const logoutBtn      = document.getElementById('logoutBtn');
+const authError      = document.getElementById('authError');
+const authRegisterHint     = document.getElementById('authRegisterHint');
+const authRegisterHintText = document.getElementById('authRegisterHintText');
 const paymentSuccess = document.getElementById('paymentSuccess');
-const paymentError = document.getElementById('paymentError');
-const patientList = document.getElementById('patientList');
-const patientName = document.getElementById('patientName');
-const patientStatus = document.getElementById('patientStatus');
-const vitalsGrid = document.getElementById('vitalsGrid');
-const alertList = document.getElementById('alertList');
+const paymentError   = document.getElementById('paymentError');
+const patientList    = document.getElementById('patientList');
+const patientName    = document.getElementById('patientName');
+const patientStatus  = document.getElementById('patientStatus');
+const vitalsGrid     = document.getElementById('vitalsGrid');
+const alertList      = document.getElementById('alertList');
 
 let currentPatientId = null;
-let currentFile = null;
-let isAnalyzing = false;
-let authMode = 'login';
+let currentFile      = null;
+let isAnalyzing      = false;
 
 const patients = [
     {
@@ -94,52 +95,78 @@ const patients = [
 document.addEventListener('DOMContentLoaded', () => {
     init();
 
-    // Single-form auth UI: login/register toggle
-    const authForm = document.getElementById('authForm');
-    const showLoginBtn = document.getElementById('showLogin');
-    const showRegisterBtn = document.getElementById('showRegister');
-    const fullNameGroup = document.getElementById('fullNameGroup');
+    // ── TOP TAB: Login / Register / Forgot ────────────────────
+    const tabLogin    = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const tabForgot   = document.getElementById('tabForgot');
 
-    if (showLoginBtn) {
-        showLoginBtn.addEventListener('click', () => {
-            authMode = 'login';
-            showLoginBtn.classList.add('active');
-            if (showRegisterBtn) showRegisterBtn.classList.remove('active');
-            if (fullNameGroup) fullNameGroup.classList.add('hidden');
-        });
+    const loginPanel    = document.getElementById('loginPanel');
+    const registerPanel = document.getElementById('registerPanel');
+    const forgotPanel   = document.getElementById('forgotPanel');
+
+    function showAuthPanel(panel) {
+        [loginPanel, registerPanel, forgotPanel].forEach(p => p && p.classList.add('hidden'));
+        [tabLogin, tabRegister, tabForgot].forEach(t => t && t.classList.remove('active'));
+        if (panel === 'login')    { loginPanel   && loginPanel.classList.remove('hidden');    tabLogin   && tabLogin.classList.add('active'); }
+        if (panel === 'register') { registerPanel && registerPanel.classList.remove('hidden'); tabRegister && tabRegister.classList.add('active'); }
+        if (panel === 'forgot')   { forgotPanel  && forgotPanel.classList.remove('hidden');   tabForgot  && tabForgot.classList.add('active'); }
+        hideAuthError();
     }
 
-    if (showRegisterBtn) {
-        showRegisterBtn.addEventListener('click', () => {
-            authMode = 'register';
-            showRegisterBtn.classList.add('active');
-            if (showLoginBtn) showLoginBtn.classList.remove('active');
-            if (fullNameGroup) fullNameGroup.classList.remove('hidden');
-        });
-    }
+    tabLogin    && tabLogin.addEventListener('click',    () => showAuthPanel('login'));
+    tabRegister && tabRegister.addEventListener('click', () => showAuthPanel('register'));
+    tabForgot   && tabForgot.addEventListener('click',   () => showAuthPanel('forgot'));
 
-    if (authForm) {
-        authForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (authMode === 'login') {
-                await login();
-            } else {
-                await registerFromAuthForm();
-            }
-        });
-    }
+    // ── REGISTER: Doctor / Patient sub-toggle ─────────────────
+    const tabDoctorReg   = document.getElementById('tabDoctorReg');
+    const tabPatientReg  = document.getElementById('tabPatientReg');
+    const doctorRegPanel = document.getElementById('doctorRegPanel');
+    const patientRegPanel= document.getElementById('patientRegPanel');
 
-    // Wire logout button on the main page
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await logout();
-        });
-    }
+    tabDoctorReg && tabDoctorReg.addEventListener('click', () => {
+        doctorRegPanel  && doctorRegPanel.classList.remove('hidden');
+        patientRegPanel && patientRegPanel.classList.add('hidden');
+        tabDoctorReg.classList.add('active');
+        tabPatientReg && tabPatientReg.classList.remove('active');
+        hideAuthError();
+    });
+
+    tabPatientReg && tabPatientReg.addEventListener('click', () => {
+        patientRegPanel && patientRegPanel.classList.remove('hidden');
+        doctorRegPanel  && doctorRegPanel.classList.add('hidden');
+        tabPatientReg.classList.add('active');
+        tabDoctorReg && tabDoctorReg.classList.remove('active');
+        hideAuthError();
+    });
+
+    // ── OTP buttons ───────────────────────────────────────────
+    const sendOtpDrBtn     = document.getElementById('sendOtpDrBtn');
+    const sendOtpPtBtn     = document.getElementById('sendOtpPtBtn');
+    const sendOtpForgotBtn = document.getElementById('sendOtpForgotBtn');
+
+    sendOtpDrBtn     && sendOtpDrBtn.addEventListener('click',     () => sendOtp('dr'));
+    sendOtpPtBtn     && sendOtpPtBtn.addEventListener('click',     () => sendOtp('pt'));
+    sendOtpForgotBtn && sendOtpForgotBtn.addEventListener('click', () => sendOtp('forgot'));
+
+    // ── FORM submissions ──────────────────────────────────────
+    const loginForm    = document.getElementById('loginForm');
+    const doctorRegForm= document.getElementById('doctorRegForm');
+    const patientRegForm=document.getElementById('patientRegForm');
+    const forgotForm   = document.getElementById('forgotForm');
+
+    loginForm     && loginForm.addEventListener('submit',    (e) => { e.preventDefault(); login(); });
+    doctorRegForm && doctorRegForm.addEventListener('submit',(e) => { e.preventDefault(); registerDoctor(); });
+    patientRegForm&& patientRegForm.addEventListener('submit',(e)=> { e.preventDefault(); registerPatient(); });
+    forgotForm    && forgotForm.addEventListener('submit',   (e) => { e.preventDefault(); forgotPassword(); });
+
+    // ── LOGOUT ────────────────────────────────────────────────
+    logoutBtn && logoutBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await logout();
+    });
 });
 
 async function init() {
-    setAuthTab('login');
     if (patientList) renderPatientList();
     const token = getToken();
     await checkAPIStatus();
@@ -256,24 +283,63 @@ function authHeaders() {
 }
 
 function showAuth() {
-    if (authSection) authSection.classList.remove('hidden');
-    if (dashboardSection) dashboardSection.classList.add('hidden');
-    if (userBadge) userBadge.classList.add('hidden');
-    if (logoutBtn) logoutBtn.classList.add('hidden');
+    if (authSection)    authSection.classList.remove('hidden');
+    if (appSection)     appSection.classList.add('hidden');
+    if (patientSection) patientSection.classList.add('hidden');
+    if (userBadge)      userBadge.classList.add('hidden');
+    if (logoutBtn)      logoutBtn.classList.add('hidden');
 }
 
 function showApp(user) {
     if (authSection) authSection.classList.add('hidden');
-    if (dashboardSection) dashboardSection.classList.remove('hidden');
+    const role = user && user.role;
+
+    // Hide both dashboards first, then show the right one
+    if (appSection)     appSection.classList.add('hidden');
+    if (patientSection) patientSection.classList.add('hidden');
+
+    if (role === 'doctor') {
+        if (appSection) appSection.classList.remove('hidden');
+        if (patientList) renderPatientList();
+    } else {
+        // patient (or unknown role) → patient dashboard
+        if (patientSection) {
+            patientSection.classList.remove('hidden');
+            renderPatientDashboard(user);
+        }
+    }
+
     if (userBadge) {
-        if (user) userBadge.classList.remove('hidden');
-        else userBadge.classList.add('hidden');
+        if (user) {
+            userBadge.classList.remove('hidden');
+            const roleBadge = `<span class="role-badge">${role || 'user'}</span>`;
+            if (userNameEl) userNameEl.innerHTML = (user.name || user.full_name || 'Member') + roleBadge;
+        } else {
+            userBadge.classList.add('hidden');
+        }
     }
     if (logoutBtn) {
         if (user) logoutBtn.classList.remove('hidden');
-        else logoutBtn.classList.add('hidden');
+        else      logoutBtn.classList.add('hidden');
     }
-    if (userNameEl && user) userNameEl.textContent = user.full_name || user.username || 'Member';
+}
+
+function renderPatientDashboard(user) {
+    const grid = document.getElementById('patientInfoGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    const items = [
+        { label: 'Patient ID',   value: user.user_id  || '—' },
+        { label: 'Name',         value: user.name || user.full_name || '—' },
+        { label: 'Mobile',       value: user.mobile   || '—' },
+        { label: 'Account Type', value: 'Patient' },
+    ];
+    items.forEach(({ label, value }) => {
+        const div = document.createElement('div');
+        div.className = 'patient-info-item';
+        div.innerHTML = `<div class="pi-label">${label}</div><div class="pi-value">${value}</div>`;
+        grid.appendChild(div);
+    });
 }
 
 async function checkAPIStatus() {
@@ -281,7 +347,6 @@ async function checkAPIStatus() {
         const response = await fetch(`${API_BASE}/health`);
         const data = await response.json();
         const online = data.status === 'healthy' && data.model_loaded;
-
         updateStatusBadge(online ? 'Model ready' : 'Model loading', online);
     } catch (err) {
         updateStatusBadge('API offline', false);
@@ -289,45 +354,84 @@ async function checkAPIStatus() {
 }
 
 function updateStatusBadge(text, online) {
-    const statusDot = document.querySelector('.badge .dot');
+    const statusDot  = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
-
     if (statusDot) {
-        statusDot.style.background = online ? '#34d399' : '#f87171';
-        statusDot.style.boxShadow = online ? '0 0 0 4px rgba(52, 211, 153, 0.25)' : '0 0 0 4px rgba(248, 113, 113, 0.25)';
+        statusDot.style.background  = online ? '#34d399' : '#f87171';
+        statusDot.style.boxShadow   = online ? '0 0 0 4px rgba(52,211,153,.25)' : '0 0 0 4px rgba(248,113,113,.25)';
+    }
+    if (statusText) statusText.textContent = text;
+}
+
+// ── OTP helper ────────────────────────────────────────────────
+
+async function sendOtp(context) {
+    const mobileId  = context === 'dr' ? 'drMobile' : context === 'pt' ? 'ptMobile' : 'forgotMobile';
+    const otpGroupId= context === 'dr' ? 'drOtpGroup' : context === 'pt' ? 'ptOtpGroup' : 'forgotOtpGroup';
+    const hintId    = context === 'dr' ? 'drOtpHint' : context === 'pt' ? 'ptOtpHint' : 'forgotOtpHint';
+    const btnId     = context === 'dr' ? 'sendOtpDrBtn' : context === 'pt' ? 'sendOtpPtBtn' : 'sendOtpForgotBtn';
+
+    const mobile  = (document.getElementById(mobileId) || {}).value || '';
+    if (!mobile || mobile.trim().length < MIN_MOBILE_LENGTH) {
+        showAuthError('Please enter a valid mobile number before sending OTP.');
+        return;
     }
 
-    if (statusText) {
-        statusText.textContent = text;
+    const btn = document.getElementById(btnId);
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    hideAuthError();
+
+    try {
+        const result = await apiFetch('/send-otp', {
+            method: 'POST',
+            body: JSON.stringify({ mobile: mobile.trim() }),
+        });
+
+        const otpGroup = document.getElementById(otpGroupId);
+        if (otpGroup) otpGroup.classList.remove('hidden');
+
+        const hint = document.getElementById(hintId);
+        if (hint) {
+            // otp_demo is returned for development/demo purposes
+            hint.textContent = result.otp_demo
+                ? `OTP sent (demo: ${result.otp_demo})`
+                : 'OTP sent to your mobile number.';
+        }
+
+        // Start countdown on button
+        if (btn) {
+            btn.textContent = `Resend (${Math.floor(OTP_COUNTDOWN_SECONDS / 60)}:00)`;
+            let remaining = OTP_COUNTDOWN_SECONDS;
+            const countdown = setInterval(() => {
+                remaining--;
+                if (remaining <= 0) {
+                    clearInterval(countdown);
+                    btn.disabled = false;
+                    btn.textContent = 'Resend OTP';
+                } else {
+                    const m = String(Math.floor(remaining / 60)).padStart(1, '0');
+                    const s = String(remaining % 60).padStart(2, '0');
+                    btn.textContent = `Resend (${m}:${s})`;
+                }
+            }, 1000);
+        }
+    } catch (err) {
+        showAuthError(err.message || 'Failed to send OTP.');
+        if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
     }
 }
 
-function setAuthTab(tab) {
-    const loginFormEl = document.getElementById('loginForm');
-    const registerFormEl = document.getElementById('registerForm');
-    const tabLoginEl = document.getElementById('tabLogin');
-    const tabSignupEl = document.getElementById('tabSignup');
-
-    if (loginFormEl) loginFormEl.classList.toggle('hidden', tab !== 'login');
-    if (registerFormEl) registerFormEl.classList.toggle('hidden', tab !== 'register');
-    if (tabLoginEl) tabLoginEl.classList.toggle('btn-primary', tab === 'login');
-    if (tabLoginEl) tabLoginEl.classList.toggle('btn-ghost', tab !== 'login');
-    if (tabSignupEl) tabSignupEl.classList.toggle('btn-primary', tab === 'register');
-    if (tabSignupEl) tabSignupEl.classList.toggle('btn-ghost', tab !== 'register');
-    if (authError) authError.style.display = 'none';
-    if (paymentError) paymentError.style.display = 'none';
-    if (paymentSuccess) paymentSuccess.style.display = 'none';
-}
+// ── Login ──────────────────────────────────────────────────────
 
 async function login() {
-    if (authError) authError.style.display = 'none';
-    if (authHint) authHint.style.display = 'none';
+    hideAuthError();
 
-    const username = document.getElementById('authUsername').value.trim();
-    const password = document.getElementById('authPassword').value.trim();
+    const userId   = (document.getElementById('loginId')       || {}).value || '';
+    const name     = (document.getElementById('loginName')     || {}).value || '';
+    const password = (document.getElementById('loginPassword') || {}).value || '';
 
-    if (!username || !password) {
-        showAuthError('Please enter both username and password.');
+    if (!userId || !name || !password) {
+        showAuthError('Please fill in all fields: ID, Name, and Password.');
         return;
     }
 
@@ -335,9 +439,8 @@ async function login() {
     try {
         const result = await apiFetch('/login', {
             method: 'POST',
-            body: JSON.stringify({ username, password }),
+            body: JSON.stringify({ user_id: userId.trim(), name: name.trim(), password }),
         });
-
         setToken(result.access_token);
         const user = await fetchMe();
         showApp(user);
@@ -348,27 +451,30 @@ async function login() {
     }
 }
 
-async function registerFromAuthForm() {
-    if (authError) authError.style.display = 'none';
-    if (authRegisterHint) authRegisterHint.style.display = 'none';
+// ── Register ───────────────────────────────────────────────────
 
-    const username = document.getElementById('authUsername').value.trim();
-    const password = document.getElementById('authPassword').value;
-    const fullNameEl = document.getElementById('authFullName');
-    const fullName = fullNameEl ? fullNameEl.value.trim() : '';
+async function registerDoctor() {
+    hideAuthError();
 
-    if (!username || !password) {
-        showAuthError('Username and password are required.');
+    const name     = (document.getElementById('drName')     || {}).value || '';
+    const dept     = (document.getElementById('drDept')     || {}).value || '';
+    const mobile   = (document.getElementById('drMobile')   || {}).value || '';
+    const otp      = (document.getElementById('drOtp')      || {}).value || '';
+    const password = (document.getElementById('drPassword') || {}).value || '';
+
+    if (!name || !dept || !mobile || !otp || !password) {
+        showAuthError('Please fill in all fields and verify your OTP.');
         return;
     }
 
-    showGlobalLoader('Creating account…');
+    showGlobalLoader('Creating doctor account…');
     try {
         const result = await apiFetch('/register', {
             method: 'POST',
-            body: JSON.stringify({ username, full_name: fullName, password }),
+            body: JSON.stringify({ role: 'doctor', name: name.trim(), department: dept.trim(), mobile: mobile.trim(), otp: otp.trim(), password }),
         });
-
+        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
+        if (authRegisterHintText) authRegisterHintText.textContent = result.message || `Your Doctor ID is: ${result.user_id}`;
         setToken(result.access_token);
         const user = await fetchMe();
         showApp(user);
@@ -379,36 +485,64 @@ async function registerFromAuthForm() {
     }
 }
 
-async function register() {
-    if (authError) authError.style.display = 'none';
-    if (authHint) authHint.style.display = 'none';
-    if (authRegisterHint) authRegisterHint.style.display = 'none';
+async function registerPatient() {
+    hideAuthError();
 
-    const usernameEl = document.getElementById('registerUsername');
-    const fullNameEl = document.getElementById('registerFullName');
-    const passwordEl = document.getElementById('registerPassword');
-    const username = usernameEl ? usernameEl.value.trim() : '';
-    const fullName = fullNameEl ? fullNameEl.value.trim() : '';
-    const password = passwordEl ? passwordEl.value.trim() : '';
+    const name     = (document.getElementById('ptName')     || {}).value || '';
+    const mobile   = (document.getElementById('ptMobile')   || {}).value || '';
+    const otp      = (document.getElementById('ptOtp')      || {}).value || '';
+    const password = (document.getElementById('ptPassword') || {}).value || '';
 
-    if (!username || !password) {
-        showAuthError('Username and password are required.');
+    if (!name || !mobile || !otp || !password) {
+        showAuthError('Please fill in all fields and verify your OTP.');
         return;
     }
 
-    showGlobalLoader('Creating account…');
+    showGlobalLoader('Creating patient account…');
     try {
         const result = await apiFetch('/register', {
             method: 'POST',
-            body: JSON.stringify({ username, full_name: fullName, password }),
+            body: JSON.stringify({ role: 'patient', name: name.trim(), mobile: mobile.trim(), otp: otp.trim(), password }),
         });
-
+        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
+        if (authRegisterHintText) authRegisterHintText.textContent = result.message || `Your Patient ID is: ${result.user_id}`;
         setToken(result.access_token);
-        if (authRegisterHint) authRegisterHint.style.display = 'flex';
         const user = await fetchMe();
         showApp(user);
     } catch (err) {
         showAuthError(err.message || 'Registration failed.');
+    } finally {
+        hideGlobalLoader();
+    }
+}
+
+// ── Forgot Password ────────────────────────────────────────────
+
+async function forgotPassword() {
+    hideAuthError();
+
+    const mobile   = (document.getElementById('forgotMobile') || {}).value || '';
+    const otp      = (document.getElementById('forgotOtp')    || {}).value || '';
+    const newPwd   = (document.getElementById('forgotNewPwd') || {}).value || '';
+
+    if (!mobile || !otp || !newPwd) {
+        showAuthError('Please fill in all fields and verify your OTP.');
+        return;
+    }
+
+    showGlobalLoader('Resetting password…');
+    try {
+        const result = await apiFetch('/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ mobile: mobile.trim(), otp: otp.trim(), new_password: newPwd }),
+        });
+        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
+        if (authRegisterHintText) authRegisterHintText.textContent = result.message || 'Password reset successful!';
+        // Switch to login tab
+        const tabLogin = document.getElementById('tabLogin');
+        if (tabLogin) tabLogin.click();
+    } catch (err) {
+        showAuthError(err.message || 'Password reset failed.');
     } finally {
         hideGlobalLoader();
     }
@@ -431,34 +565,16 @@ async function fetchMe() {
     return apiFetch('/me', { method: 'GET' });
 }
 
-async function pay() {
-    paymentError.style.display = 'none';
-    paymentSuccess.style.display = 'none';
-
-    const planSelect = document.getElementById('planSelect');
-    const plan = planSelect.value;
-    const amount = parseFloat(planSelect.selectedOptions[0].dataset.amount || 0);
-
-    showGlobalLoader('Processing payment…');
-    try {
-        const result = await apiFetch('/payment', {
-            method: 'POST',
-            body: JSON.stringify({ plan, amount, currency: 'USD' }),
-        });
-
-        paymentSuccess.style.display = 'flex';
-        paymentSuccess.innerHTML = `<i class="fas fa-check-circle"></i> Payment confirmed (ID: ${result.transaction_id})`;
-    } catch (err) {
-        paymentError.style.display = 'flex';
-        paymentError.textContent = err.message || 'Payment failed. Please try again.';
-    } finally {
-        hideGlobalLoader();
-    }
-}
-
 function showAuthError(message) {
+    if (!authError) return;
     authError.style.display = 'flex';
     authError.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+}
+
+function hideAuthError() {
+    if (!authError) return;
+    authError.style.display = 'none';
+    authError.innerHTML = '';
 }
 
 async function apiFetch(path, options = {}) {
