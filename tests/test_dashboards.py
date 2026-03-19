@@ -126,6 +126,14 @@ class DashboardFlowTests(unittest.TestCase):
         chats = doctor_two_dashboard['doctor_chats']
         self.assertEqual(chats[0]['messages'][0]['message'], 'Please review the serious cases first.')
 
+    def test_root_page_uses_local_assets(self):
+        response = asyncio.run(app_module.read_root())
+        html = response.body.decode('utf-8')
+        self.assertIn('/static/app.js', html)
+        self.assertNotIn('cdnjs.cloudflare.com', html)
+        self.assertIn('autocomplete="new-password"', html)
+        self.assertIn('autocomplete="one-time-code"', html)
+
 
 if __name__ == '__main__':
     unittest.main()
