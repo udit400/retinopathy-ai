@@ -16,12 +16,14 @@ import time
 import hashlib
 import secrets
 import random
+import json
+import base64
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
 import uvicorn
 import onnxruntime as ort
 from PIL import Image
-import torchvision.transforms as transforms
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -78,6 +80,9 @@ users: Dict[str, dict] = {}
 sessions: Dict[str, str] = {}  # token -> user_key
 otps: Dict[str, dict] = {}     # mobile -> {otp, expires_at}
 security = HTTPBearer()
+DEFAULT_DOCTOR_FEE = 1.0
+NORMAL_APPOINTMENTS_PER_DAY = 30
+SERIOUS_APPOINTMENTS_PER_DAY = 5
 
 class UserCreate(BaseModel):
     username: str
@@ -117,6 +122,38 @@ class ForgotPasswordRequest(BaseModel):
     mobile: str
     otp: str
     new_password: str
+
+
+class PatientSubmissionRequest(BaseModel):
+    doctor_id: str
+    note: str = ""
+    image_name: Optional[str] = None
+    image_data_url: Optional[str] = None
+
+
+class DoctorReportRequest(BaseModel):
+    submission_id: str
+    treatments: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
+    report_summary: str = ""
+    note: str = ""
+    severity: Optional[str] = None
+    appointment_date: Optional[str] = None
+    appointment_type: Optional[str] = None
+
+
+class DoctorFeeRequest(BaseModel):
+    fee: float
+
+
+class DoctorMessageRequest(BaseModel):
+    doctor_id: str
+    message: str
+
+
+class ImportanceRequest(BaseModel):
+    report_id: str
+    important: bool
 
 
 def load_onnx_model():
@@ -164,7 +201,6 @@ def _load_users() -> None:
     global users
     if os.path.exists(USERS_FILE):
         try:
-            import json
             with open(USERS_FILE, "r", encoding="utf-8") as f:
                 loaded = json.load(f) or {}
             users = {}
@@ -175,6 +211,7 @@ def _load_users() -> None:
                     u["name"] = u.get("full_name") or u.get("username") or key
                     u["role"] = u.get("role", "doctor")
                     u.setdefault("mobile", "")
+                _ensure_user_defaults(u)
                 users[key] = u
         except Exception:
             users = {}
@@ -184,7 +221,6 @@ def _load_users() -> None:
 
 def _save_users() -> None:
     try:
-        import json
         os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(users, f, indent=2)
@@ -195,6 +231,9 @@ def _save_users() -> None:
 def _create_default_user() -> None:
     # Check if demo user already exists (keyed by user_id or username "demo")
     if any(u.get("username") == "demo" or u.get("name") == "Demo Doctor" for u in users.values()):
+        for user in users.values():
+            _ensure_user_defaults(user)
+        _save_users()
         return
     if "demo" not in users:
         demo_id = _generate_numeric_id()
@@ -206,10 +245,153 @@ def _create_default_user() -> None:
             "role": "doctor",
             "mobile": "",
             "department": "General",
+            "fees": DEFAULT_DOCTOR_FEE,
             "password": _hash_password("demo123"),
             "created_at": time.time(),
         }
+        _ensure_user_defaults(users[demo_id])
         _save_users()
+
+
+def _ensure_user_defaults(user: dict) -> dict:
+    user.setdefault("profile_image", "")
+    if user.get("role") == "doctor":
+        user.setdefault("fees", DEFAULT_DOCTOR_FEE)
+        user.setdefault("department", user.get("department") or "General")
+        user.setdefault("patient_submissions", [])
+        user.setdefault("doctor_messages", [])
+        user.setdefault("appointments", [])
+    else:
+        user.setdefault("doctor_reports", [])
+        user.setdefault("appointments", [])
+        user.setdefault("important_reports", [])
+    return user
+
+
+def _serialize_user(user: dict) -> dict:
+    safe_user = dict(user)
+    safe_user.pop("password", None)
+    return safe_user
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _avatar_text(user: dict) -> str:
+    name = (user.get("name") or user.get("full_name") or user.get("username") or "?").strip()
+    letters = [part[:1].upper() for part in name.split()[:2] if part]
+    return "".join(letters) or name[:2].upper() or "?"
+
+
+def _doctor_public_profile(user: dict) -> dict:
+    return {
+        "user_id": user.get("user_id"),
+        "name": user.get("name") or user.get("full_name"),
+        "department": user.get("department") or "General",
+        "fees": float(user.get("fees") or DEFAULT_DOCTOR_FEE),
+        "avatar_text": _avatar_text(user),
+        "image_url": user.get("profile_image") or "",
+    }
+
+
+def _patient_public_profile(user: dict) -> dict:
+    return {
+        "user_id": user.get("user_id"),
+        "name": user.get("name") or user.get("full_name"),
+        "mobile": user.get("mobile", ""),
+        "avatar_text": _avatar_text(user),
+        "image_url": user.get("profile_image") or "",
+    }
+
+
+def _normalize_text_list(values: List[str]) -> List[str]:
+    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
+
+
+def _decode_data_url(data_url: str) -> bytes:
+    if "," not in data_url:
+        raise HTTPException(status_code=400, detail="Data URL does not contain the expected separator")
+    try:
+        _, encoded = data_url.split(",", 1)
+        return base64.b64decode(encoded)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid data URL format") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Failed to decode base64 image data") from exc
+
+
+def _analyze_image_bytes(image_bytes: bytes) -> dict:
+    if not model_loaded:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    image_array = preprocess_image(image_bytes)
+    input_name = onnx_session.get_inputs()[0].name
+    output_name = onnx_session.get_outputs()[0].name
+    outputs = onnx_session.run([output_name], {input_name: image_array})[0]
+    exp_outputs = np.exp(outputs - np.max(outputs, axis=1, keepdims=True))
+    probabilities = exp_outputs / np.sum(exp_outputs, axis=1, keepdims=True)
+
+    predicted_class = int(np.argmax(probabilities, axis=1)[0])
+    confidence = float(probabilities[0][predicted_class])
+    return {
+        "predicted_class": predicted_class,
+        "predicted_class_name": class_names[predicted_class],
+        "confidence": round(confidence * 100, 2),
+        "all_probabilities": {
+            class_names[i]: round(float(probabilities[0][i]) * 100, 2)
+            for i in range(len(class_names))
+        },
+        "diagnosis": get_diagnosis(predicted_class, confidence),
+        "recommendations": get_recommendations(predicted_class, confidence),
+        "severity_level": get_severity_text(predicted_class, confidence),
+    }
+
+
+def _find_submission_for_doctor(doctor: dict, submission_id: str) -> Optional[dict]:
+    for submission in doctor.get("patient_submissions", []):
+        if submission.get("submission_id") == submission_id:
+            return submission
+    return None
+
+
+def _find_report_for_patient(patient: dict, report_id: str) -> Optional[dict]:
+    for report in patient.get("doctor_reports", []):
+        if report.get("report_id") == report_id:
+            return report
+    return None
+
+
+def _schedule_appointment(doctor: dict, patient: dict, severity: str, report_summary: str) -> dict:
+    severity_key = "serious" if severity == "serious" else "normal"
+    slot_limit = SERIOUS_APPOINTMENTS_PER_DAY if severity_key == "serious" else NORMAL_APPOINTMENTS_PER_DAY
+    start_date = datetime.now(timezone.utc).date() + timedelta(days=3)
+
+    while True:
+        candidate = start_date.isoformat()
+        existing = [
+            appointment for appointment in doctor.get("appointments", [])
+            if appointment.get("appointment_date") == candidate and appointment.get("appointment_type") == severity_key
+        ]
+        if len(existing) < slot_limit:
+            appointment_number = len(existing) + 1
+            appointment = {
+                "appointment_id": secrets.token_hex(6),
+                "appointment_date": candidate,
+                "appointment_type": severity_key,
+                "slot_number": appointment_number,
+                "doctor_id": doctor.get("user_id"),
+                "doctor_name": doctor.get("name") or doctor.get("full_name"),
+                "patient_id": patient.get("user_id"),
+                "patient_name": patient.get("name") or patient.get("full_name"),
+                "patient_mobile": patient.get("mobile", ""),
+                "summary": report_summary.strip() or "Retinopathy follow-up review",
+                "created_at": _now_iso(),
+            }
+            doctor.setdefault("appointments", []).append(appointment)
+            patient.setdefault("appointments", []).append(appointment.copy())
+            return appointment
+        start_date += timedelta(days=1)
 
 
 def _generate_numeric_id() -> str:
@@ -238,24 +420,18 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
     """Preprocess image to match the input expected by the model"""
     try:
         image = Image.open(io.BytesIO(image_bytes))
-        
+
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
-        # Use the same transforms as in the training (without augmentation)
-        transform = transforms.Compose([
-            transforms.Resize((255, 255)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                               std=[0.229, 0.224, 0.225])
-        ])
-        
-        # Apply transformations
-        image_tensor = transform(image).unsqueeze(0)
-        
-        # Convert to numpy and ensure float32 type for ONNX
-        return image_tensor.numpy().astype(np.float32)
-        
+
+        image = image.resize((255, 255))
+        image_array = np.asarray(image, dtype=np.float32) / 255.0
+        image_array = np.transpose(image_array, (2, 0, 1))
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
+        image_array = (image_array - mean) / std
+        return np.expand_dims(image_array, axis=0).astype(np.float32)
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Image preprocessing failed: {str(e)}")
 
@@ -336,7 +512,9 @@ async def register_user(request: RegisterRequest):
     }
     if request.role == "doctor":
         user_data["department"] = request.department
+        user_data["fees"] = DEFAULT_DOCTOR_FEE
 
+    _ensure_user_defaults(user_data)
     users[user_id] = user_data
     otps.pop(request.mobile, None)  # consume OTP
     _save_users()
@@ -438,7 +616,301 @@ async def me(current_user: dict = Depends(get_current_user)):
         "role": current_user.get("role", "patient"),
         "department": current_user.get("department"),
         "mobile": current_user.get("mobile", ""),
+        "fees": float(current_user.get("fees") or DEFAULT_DOCTOR_FEE),
+        "avatar_text": _avatar_text(current_user),
+        "image_url": current_user.get("profile_image") or "",
     }
+
+
+@app.get("/doctors")
+async def list_doctors(current_user: dict = Depends(get_current_user)):
+    doctors = [
+        _doctor_public_profile(user)
+        for user in users.values()
+        if user.get("role") == "doctor"
+    ]
+    doctors.sort(key=lambda item: (item["name"] or "").lower())
+    return {"doctors": doctors}
+
+
+@app.get("/patient/dashboard")
+async def patient_dashboard(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "patient":
+        raise HTTPException(status_code=403, detail="Only patients can access this dashboard")
+
+    reports = sorted(
+        current_user.get("doctor_reports", []),
+        key=lambda report: report.get("sent_at", ""),
+        reverse=True,
+    )
+    return {
+        "patient": _patient_public_profile(current_user),
+        "reports": reports,
+        "appointments": sorted(
+            current_user.get("appointments", []),
+            key=lambda appointment: (appointment.get("appointment_date", ""), appointment.get("slot_number", 0)),
+        ),
+        "important_reports": [
+            report for report in reports
+            if report.get("important") or report.get("report_id") in current_user.get("important_reports", [])
+        ],
+    }
+
+
+@app.post("/patient/submissions")
+async def create_patient_submission(
+    request: PatientSubmissionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "patient":
+        raise HTTPException(status_code=403, detail="Only patients can send submissions")
+
+    doctor = users.get(request.doctor_id)
+    if not doctor or doctor.get("role") != "doctor":
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
+    if not request.note.strip() and not request.image_data_url:
+        raise HTTPException(status_code=400, detail="Please provide a note or retinal image")
+
+    submission = {
+        "submission_id": secrets.token_hex(6),
+        "patient_id": current_user.get("user_id"),
+        "patient_name": current_user.get("name") or current_user.get("full_name"),
+        "patient_mobile": current_user.get("mobile", ""),
+        "doctor_id": doctor.get("user_id"),
+        "doctor_name": doctor.get("name") or doctor.get("full_name"),
+        "note": request.note.strip(),
+        "image_name": (request.image_name or "").strip(),
+        "image_data_url": request.image_data_url or "",
+        "created_at": _now_iso(),
+        "status": "new",
+        "ai_result": None,
+    }
+    doctor.setdefault("patient_submissions", []).append(submission)
+    _save_users()
+    return {"message": "Retinopathy image and note sent to doctor", "submission": submission}
+
+
+@app.post("/patient/reports/{report_id}/importance")
+async def mark_report_importance(
+    report_id: str,
+    request: ImportanceRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "patient":
+        raise HTTPException(status_code=403, detail="Only patients can update importance")
+    if request.report_id != report_id:
+        raise HTTPException(status_code=400, detail="Report mismatch")
+
+    report = _find_report_for_patient(current_user, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report["important"] = bool(request.important)
+    important_ids = set(current_user.get("important_reports", []))
+    if request.important:
+        important_ids.add(report_id)
+    else:
+        important_ids.discard(report_id)
+    current_user["important_reports"] = sorted(important_ids)
+    _save_users()
+    return {"message": "Importance updated", "report": report}
+
+
+@app.get("/doctor/dashboard")
+async def doctor_dashboard(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "doctor":
+        raise HTTPException(status_code=403, detail="Only doctors can access this dashboard")
+
+    submissions = []
+    for item in current_user.get("patient_submissions", []):
+        patient = users.get(item.get("patient_id"), {})
+        submissions.append({
+            **item,
+            "patient_profile": _patient_public_profile(patient) if patient else {},
+            "patient_history": sorted(
+                patient.get("doctor_reports", []),
+                key=lambda report: report.get("sent_at", ""),
+                reverse=True,
+            )[:5] if patient else [],
+        })
+    submissions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    conversations = {}
+    for message in current_user.get("doctor_messages", []):
+        other_id = message.get("from_doctor_id")
+        if other_id == current_user.get("user_id"):
+            other_id = message.get("to_doctor_id")
+        conversations.setdefault(other_id, []).append(message)
+
+    return {
+        "doctor": _doctor_public_profile(current_user),
+        "patient_messages": submissions,
+        "doctor_chats": [
+            {
+                "doctor": _doctor_public_profile(users[doctor_id]),
+                "messages": sorted(messages, key=lambda message: message.get("created_at", "")),
+            }
+            for doctor_id, messages in conversations.items()
+            if doctor_id in users and users[doctor_id].get("role") == "doctor"
+        ],
+        "appointments": sorted(
+            current_user.get("appointments", []),
+            key=lambda appointment: (appointment.get("appointment_date", ""), appointment.get("slot_number", 0)),
+        ),
+    }
+
+
+@app.post("/doctor/profile/fees")
+async def update_doctor_fee(
+    request: DoctorFeeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "doctor":
+        raise HTTPException(status_code=403, detail="Only doctors can update fees")
+    if request.fee <= 0:
+        raise HTTPException(status_code=400, detail="Fees must be greater than zero")
+
+    current_user["fees"] = round(float(request.fee), 2)
+    _save_users()
+    return {"message": "Fees updated", "doctor": _doctor_public_profile(current_user)}
+
+
+@app.post("/doctor/messages")
+async def send_doctor_message(
+    request: DoctorMessageRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "doctor":
+        raise HTTPException(status_code=403, detail="Only doctors can send doctor chat messages")
+    target = users.get(request.doctor_id)
+    if not target or target.get("role") != "doctor":
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    message_text = request.message.strip()
+    if not message_text:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    message = {
+        "message_id": secrets.token_hex(6),
+        "from_doctor_id": current_user.get("user_id"),
+        "from_doctor_name": current_user.get("name") or current_user.get("full_name"),
+        "to_doctor_id": target.get("user_id"),
+        "to_doctor_name": target.get("name") or target.get("full_name"),
+        "message": message_text,
+        "created_at": _now_iso(),
+    }
+    current_user.setdefault("doctor_messages", []).append(message)
+    target.setdefault("doctor_messages", []).append(message.copy())
+    _save_users()
+    return {"message": "Doctor message sent", "chat_message": message}
+
+
+@app.post("/doctor/submissions/{submission_id}/analyze")
+async def analyze_submission(
+    submission_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "doctor":
+        raise HTTPException(status_code=403, detail="Only doctors can analyze submissions")
+
+    submission = _find_submission_for_doctor(current_user, submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if not submission.get("image_data_url"):
+        raise HTTPException(status_code=400, detail="Submission does not include an image")
+
+    if not submission.get("ai_result"):
+        submission["ai_result"] = _analyze_image_bytes(_decode_data_url(submission["image_data_url"]))
+        submission["status"] = "analyzed"
+        _save_users()
+    return {"submission": submission}
+
+
+@app.post("/doctor/reports")
+async def send_doctor_report(
+    request: DoctorReportRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "doctor":
+        raise HTTPException(status_code=403, detail="Only doctors can send reports")
+
+    submission = _find_submission_for_doctor(current_user, request.submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    patient = users.get(submission.get("patient_id"))
+    if not patient or patient.get("role") != "patient":
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    ai_result = submission.get("ai_result")
+    severity = (request.severity or "").strip().lower()
+    if severity not in {"normal", "serious"}:
+        if ai_result and ai_result.get("predicted_class_name") == "DR":
+            severity = "serious"
+        else:
+            severity = "normal"
+
+    treatments = _normalize_text_list(request.treatments) or [
+        "Blood sugar optimisation plan",
+        "Retinal specialist review",
+    ]
+    suggestions = _normalize_text_list(request.suggestions) or (
+        ai_result.get("recommendations", []) if ai_result else ["Continue regular retinal follow-up"]
+    )
+    report_summary = request.report_summary.strip() or (
+        ai_result.get("diagnosis") if ai_result else "Doctor reviewed the retinal submission."
+    )
+    note = request.note.strip() or submission.get("note", "")
+
+    appointment = None
+    if request.appointment_date:
+        appointment_type = (request.appointment_type or severity).strip().lower() or severity
+        same_day = [
+            item for item in current_user.get("appointments", [])
+            if item.get("appointment_date") == request.appointment_date and item.get("appointment_type") == appointment_type
+        ]
+        appointment = {
+            "appointment_id": secrets.token_hex(6),
+            "appointment_date": request.appointment_date,
+            "appointment_type": appointment_type,
+            "slot_number": len(same_day) + 1,
+            "doctor_id": current_user.get("user_id"),
+            "doctor_name": current_user.get("name") or current_user.get("full_name"),
+            "patient_id": patient.get("user_id"),
+            "patient_name": patient.get("name") or patient.get("full_name"),
+            "patient_mobile": patient.get("mobile", ""),
+            "summary": report_summary,
+            "created_at": _now_iso(),
+        }
+        current_user.setdefault("appointments", []).append(appointment)
+        patient.setdefault("appointments", []).append(appointment.copy())
+    else:
+        appointment = _schedule_appointment(current_user, patient, severity, report_summary)
+
+    report = {
+        "report_id": secrets.token_hex(6),
+        "submission_id": submission.get("submission_id"),
+        "doctor_id": current_user.get("user_id"),
+        "doctor_name": current_user.get("name") or current_user.get("full_name"),
+        "doctor_fee": float(current_user.get("fees") or DEFAULT_DOCTOR_FEE),
+        "patient_id": patient.get("user_id"),
+        "patient_name": patient.get("name") or patient.get("full_name"),
+        "sent_at": _now_iso(),
+        "severity": severity,
+        "treatments": treatments,
+        "suggestions": suggestions,
+        "report_summary": report_summary,
+        "note": note,
+        "appointment": appointment,
+        "ai_result": ai_result,
+        "important": False,
+    }
+
+    patient.setdefault("doctor_reports", []).append(report)
+    submission["status"] = "replied"
+    submission["report_id"] = report["report_id"]
+    submission["report_summary"] = report_summary
+    _save_users()
+    return {"message": "Doctor report sent to patient", "report": report}
 
 
 @app.post("/payment")
@@ -483,38 +955,9 @@ async def predict_retinopathy(
     
     try:
         image_bytes = await file.read()
-        image_array = preprocess_image(image_bytes)
-        
-        # Run inference with ONNX Runtime
-        input_name = onnx_session.get_inputs()[0].name
-        output_name = onnx_session.get_outputs()[0].name
-        
-        outputs = onnx_session.run([output_name], {input_name: image_array})[0]
-        
-        # Convert logits to probabilities using softmax (more stable than exp alone)
-        exp_outputs = np.exp(outputs - np.max(outputs, axis=1, keepdims=True))
-        probabilities = exp_outputs / np.sum(exp_outputs, axis=1, keepdims=True)
-        
-        predicted_class = int(np.argmax(probabilities, axis=1)[0])
-        confidence = float(probabilities[0][predicted_class])
-        
-        severity_text = get_severity_text(predicted_class, confidence)
-        
-        results = {
-            "predicted_class": predicted_class,
-            "predicted_class_name": class_names[predicted_class],
-            "confidence": round(confidence * 100, 2),
-            "all_probabilities": {
-                class_names[i]: round(float(probabilities[0][i]) * 100, 2)
-                for i in range(len(class_names))
-            },
-            "diagnosis": get_diagnosis(predicted_class, confidence),
-            "recommendations": get_recommendations(predicted_class, confidence),
-            "severity_level": severity_text
-        }
-        
-        return results
-        
+        return _analyze_image_bytes(image_bytes)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 

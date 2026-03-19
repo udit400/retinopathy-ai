@@ -3,267 +3,27 @@
 const STORAGE_KEY = 'mediSightToken';
 const API_BASE = window.location.origin;
 const MIN_MOBILE_LENGTH = 7;
-const OTP_COUNTDOWN_SECONDS = 300; // 5 minutes
+const OTP_COUNTDOWN_SECONDS = 300;
 
-const globalLoader = document.getElementById('globalLoader');
-const globalLoaderText = document.getElementById('globalLoaderText');
-
-function showGlobalLoader(message = 'Please wait…') {
-    if (!globalLoader) return;
-    globalLoaderText.textContent = message;
-    globalLoader.classList.remove('hidden');
-}
-
-function hideGlobalLoader() {
-    if (!globalLoader) return;
-    globalLoader.classList.add('hidden');
-}
-
-const authSection    = document.getElementById('authSection');
-const appSection     = document.getElementById('appSection');
+const authSection = document.getElementById('authSection');
+const appSection = document.getElementById('appSection');
 const patientSection = document.getElementById('patientSection');
-const userBadge      = document.getElementById('userBadge');
-const userNameEl     = document.getElementById('userName');
-const logoutBtn      = document.getElementById('logoutBtn');
-const authError      = document.getElementById('authError');
-const authRegisterHint     = document.getElementById('authRegisterHint');
+const logoutBtn = document.getElementById('logoutBtn');
+const authError = document.getElementById('authError');
+const authRegisterHint = document.getElementById('authRegisterHint');
 const authRegisterHintText = document.getElementById('authRegisterHintText');
-const paymentSuccess = document.getElementById('paymentSuccess');
-const paymentError   = document.getElementById('paymentError');
-const patientList    = document.getElementById('patientList');
-const patientName    = document.getElementById('patientName');
-const patientStatus  = document.getElementById('patientStatus');
-const vitalsGrid     = document.getElementById('vitalsGrid');
-const alertList      = document.getElementById('alertList');
+const doctorDashboardRoot = document.getElementById('doctorDashboardRoot');
+const patientDashboardRoot = document.getElementById('patientDashboardRoot');
 
-let currentPatientId = null;
-let currentFile      = null;
-let isAnalyzing      = false;
-
-const patients = [
-    {
-        id: 'p1',
-        name: 'Evelyn Shaw',
-        age: 71,
-        condition: 'Type 2 Diabetes',
-        vitals: {
-            heartRate: 78,
-            systolic: 132,
-            diastolic: 82,
-            spO2: 95,
-            glucose: 116,
-        },
-        alerts: [
-            { level: 'warning', message: 'Blood sugar trending high (T+1h).' },
-            { level: 'info', message: 'Next telecheck scheduled in 2 days.' },
-        ],
-    },
-    {
-        id: 'p2',
-        name: 'Jamal Rivera',
-        age: 64,
-        condition: 'Hypertension',
-        vitals: {
-            heartRate: 72,
-            systolic: 142,
-            diastolic: 88,
-            spO2: 97,
-            glucose: 104,
-        },
-        alerts: [
-            { level: 'critical', message: 'BP spike detected (> 140/90).' },
-        ],
-    },
-    {
-        id: 'p3',
-        name: 'Maya Chen',
-        age: 59,
-        condition: 'Diabetic Retinopathy (Stage 1)',
-        vitals: {
-            heartRate: 76,
-            systolic: 128,
-            diastolic: 80,
-            spO2: 96,
-            glucose: 109,
-        },
-        alerts: [
-            { level: 'info', message: 'Scheduled retinal scan in 3 days.' },
-        ],
-    },
-];
-
-document.addEventListener('DOMContentLoaded', () => {
-    init();
-
-    // ── TOP TAB: Login / Register / Forgot ────────────────────
-    const tabLogin    = document.getElementById('tabLogin');
-    const tabRegister = document.getElementById('tabRegister');
-    const tabForgot   = document.getElementById('tabForgot');
-
-    const loginPanel    = document.getElementById('loginPanel');
-    const registerPanel = document.getElementById('registerPanel');
-    const forgotPanel   = document.getElementById('forgotPanel');
-
-    function showAuthPanel(panel) {
-        [loginPanel, registerPanel, forgotPanel].forEach(p => p && p.classList.add('hidden'));
-        [tabLogin, tabRegister, tabForgot].forEach(t => t && t.classList.remove('active'));
-        if (panel === 'login')    { loginPanel   && loginPanel.classList.remove('hidden');    tabLogin   && tabLogin.classList.add('active'); }
-        if (panel === 'register') { registerPanel && registerPanel.classList.remove('hidden'); tabRegister && tabRegister.classList.add('active'); }
-        if (panel === 'forgot')   { forgotPanel  && forgotPanel.classList.remove('hidden');   tabForgot  && tabForgot.classList.add('active'); }
-        hideAuthError();
-    }
-
-    tabLogin    && tabLogin.addEventListener('click',    () => showAuthPanel('login'));
-    tabRegister && tabRegister.addEventListener('click', () => showAuthPanel('register'));
-    tabForgot   && tabForgot.addEventListener('click',   () => showAuthPanel('forgot'));
-
-    // ── REGISTER: Doctor / Patient sub-toggle ─────────────────
-    const tabDoctorReg   = document.getElementById('tabDoctorReg');
-    const tabPatientReg  = document.getElementById('tabPatientReg');
-    const doctorRegPanel = document.getElementById('doctorRegPanel');
-    const patientRegPanel= document.getElementById('patientRegPanel');
-
-    tabDoctorReg && tabDoctorReg.addEventListener('click', () => {
-        doctorRegPanel  && doctorRegPanel.classList.remove('hidden');
-        patientRegPanel && patientRegPanel.classList.add('hidden');
-        tabDoctorReg.classList.add('active');
-        tabPatientReg && tabPatientReg.classList.remove('active');
-        hideAuthError();
-    });
-
-    tabPatientReg && tabPatientReg.addEventListener('click', () => {
-        patientRegPanel && patientRegPanel.classList.remove('hidden');
-        doctorRegPanel  && doctorRegPanel.classList.add('hidden');
-        tabPatientReg.classList.add('active');
-        tabDoctorReg && tabDoctorReg.classList.remove('active');
-        hideAuthError();
-    });
-
-    // ── OTP buttons ───────────────────────────────────────────
-    const sendOtpDrBtn     = document.getElementById('sendOtpDrBtn');
-    const sendOtpPtBtn     = document.getElementById('sendOtpPtBtn');
-    const sendOtpForgotBtn = document.getElementById('sendOtpForgotBtn');
-
-    sendOtpDrBtn     && sendOtpDrBtn.addEventListener('click',     () => sendOtp('dr'));
-    sendOtpPtBtn     && sendOtpPtBtn.addEventListener('click',     () => sendOtp('pt'));
-    sendOtpForgotBtn && sendOtpForgotBtn.addEventListener('click', () => sendOtp('forgot'));
-
-    // ── FORM submissions ──────────────────────────────────────
-    const loginForm    = document.getElementById('loginForm');
-    const doctorRegForm= document.getElementById('doctorRegForm');
-    const patientRegForm=document.getElementById('patientRegForm');
-    const forgotForm   = document.getElementById('forgotForm');
-
-    loginForm     && loginForm.addEventListener('submit',    (e) => { e.preventDefault(); login(); });
-    doctorRegForm && doctorRegForm.addEventListener('submit',(e) => { e.preventDefault(); registerDoctor(); });
-    patientRegForm&& patientRegForm.addEventListener('submit',(e)=> { e.preventDefault(); registerPatient(); });
-    forgotForm    && forgotForm.addEventListener('submit',   (e) => { e.preventDefault(); forgotPassword(); });
-
-    // ── LOGOUT ────────────────────────────────────────────────
-    logoutBtn && logoutBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await logout();
-    });
-});
-
-async function init() {
-    if (patientList) renderPatientList();
-    const token = getToken();
-    await checkAPIStatus();
-
-    if (token) {
-        try {
-            const user = await fetchMe();
-            showApp(user);
-        } catch (err) {
-            clearToken();
-            showAuth();
-        }
-    } else {
-        showAuth();
-    }
-}
-
-function renderPatientList() {
-    patientList.innerHTML = '';
-    patients.forEach((patient) => {
-        const li = document.createElement('li');
-        li.className = 'patient-item';
-        li.dataset.id = patient.id;
-        li.innerHTML = `
-            <div class="patient-name">${patient.name}</div>
-            <div class="patient-sub">${patient.condition}</div>
-        `;
-        li.addEventListener('click', () => selectPatient(patient.id));
-        patientList.appendChild(li);
-    });
-
-    if (!currentPatientId && patients.length) {
-        selectPatient(patients[0].id);
-    }
-}
-
-function selectPatient(id) {
-    currentPatientId = id;
-    const patient = patients.find((p) => p.id === id);
-    if (!patient) return;
-
-    document.querySelectorAll('.patient-item').forEach((el) => {
-        el.classList.toggle('active', el.dataset.id === id);
-    });
-
-    patientName.textContent = `${patient.name} (age ${patient.age})`;
-    patientStatus.textContent = `${patient.condition} • Last updated just now`;
-    renderVitals(patient.vitals);
-    renderAlerts(patient.alerts);
-}
-
-function renderVitals(vitals) {
-    vitalsGrid.innerHTML = '';
-    const cards = [
-        { label: 'Heart Rate', value: `${vitals.heartRate} bpm`, icon: 'fas fa-heartbeat' },
-        { label: 'Blood Pressure', value: `${vitals.systolic}/${vitals.diastolic} mmHg`, icon: 'fas fa-tachometer-alt' },
-        { label: 'SpO₂', value: `${vitals.spO2}%`, icon: 'fas fa-lungs' },
-        { label: 'Glucose', value: `${vitals.glucose} mg/dL`, icon: 'fas fa-prescription-bottle-alt' },
-    ];
-    cards.forEach((card) => {
-        const div = document.createElement('div');
-        div.className = 'vital-card';
-        div.innerHTML = `
-            <div class="vital-icon"><i class="${card.icon}"></i></div>
-            <div>
-                <div class="vital-value">${card.value}</div>
-                <div class="vital-label">${card.label}</div>
-            </div>
-        `;
-        vitalsGrid.appendChild(div);
-    });
-}
-
-function renderAlerts(alerts) {
-    alertList.innerHTML = '';
-    if (!alerts || alerts.length === 0) {
-        alertList.innerHTML = '<li class="alert-item">No active alerts.</li>';
-        return;
-    }
-    alerts.forEach((alert) => {
-        const li = document.createElement('li');
-        li.className = `alert-item alert-${alert.level}`;
-        li.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${alert.message}`;
-        alertList.appendChild(li);
-    });
-}
-
-function refreshVitals() {
-    const patient = patients.find((p) => p.id === currentPatientId);
-    if (!patient) return;
-    // simulate small variation
-    patient.vitals.heartRate += Number((Math.random() * 4 - 2).toFixed(0));
-    patient.vitals.glucose += Number((Math.random() * 5 - 2.5).toFixed(0));
-    renderVitals(patient.vitals);
-    showGlobalLoader('Refreshing vitals…');
-    setTimeout(() => hideGlobalLoader(), 600);
-}
+let currentUser = null;
+let patientDashboardData = null;
+let doctorDashboardData = null;
+let doctorDirectory = [];
+let patientDoctorSearch = '';
+let selectedPatientDoctorId = '';
+let selectedSubmissionId = '';
+let selectedDoctorChatId = '';
+let doctorProfileOpen = false;
 
 function getToken() {
     return localStorage.getItem(STORAGE_KEY);
@@ -282,293 +42,87 @@ function authHeaders() {
     return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatCurrency(value) {
+    const amount = Number(value || 0);
+    return `₹${amount.toFixed(2)}`;
+}
+
+function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function formatDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString();
+}
+
+function toListMarkup(items) {
+    if (!items || !items.length) return '<div class="empty-state">No items yet.</div>';
+    return `<ul class="stack-sm">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function getSelectedDoctorName() {
+    return (doctorDirectory.find((doctor) => doctor.user_id === selectedPatientDoctorId) || {}).name || 'None';
+}
+
+function getDefaultTreatments(aiResult) {
+    return aiResult && aiResult.predicted_class_name === 'DR'
+        ? ['Blood sugar optimization plan', 'Retina specialist treatment review']
+        : ['Continue regular retinal monitoring'];
+}
+
+function getDefaultSuggestions(aiResult) {
+    return (aiResult && aiResult.recommendations) || ['Follow diabetic eye care advice'];
+}
+
+function avatarMarkup(user, interactive = false) {
+    const text = escapeHtml(user?.avatar_text || (user?.name || '?').slice(0, 2).toUpperCase());
+    if (interactive) {
+        return `<button type="button" class="avatar-button" id="doctorAvatarButton" aria-label="Open doctor profile">${text}</button>`;
+    }
+    return `<div class="avatar">${text}</div>`;
+}
+
 function showAuth() {
-    if (authSection)    authSection.classList.remove('hidden');
-    if (appSection)     appSection.classList.add('hidden');
+    if (authSection) authSection.classList.remove('hidden');
+    if (appSection) appSection.classList.add('hidden');
     if (patientSection) patientSection.classList.add('hidden');
-    if (userBadge)      userBadge.classList.add('hidden');
-    if (logoutBtn)      logoutBtn.classList.add('hidden');
+    if (logoutBtn) logoutBtn.classList.add('hidden');
 }
 
-function showApp(user) {
+async function showApp(user) {
+    currentUser = user;
     if (authSection) authSection.classList.add('hidden');
-    const role = user && user.role;
-
-    // Hide both dashboards first, then show the right one
-    if (appSection)     appSection.classList.add('hidden');
-    if (patientSection) patientSection.classList.add('hidden');
-
-    if (role === 'doctor') {
+    if (logoutBtn) logoutBtn.classList.remove('hidden');
+    if (user.role === 'doctor') {
         if (appSection) appSection.classList.remove('hidden');
-        if (patientList) renderPatientList();
+        if (patientSection) patientSection.classList.add('hidden');
+        await loadDoctorDashboard();
     } else {
-        // patient (or unknown role) → patient dashboard
-        if (patientSection) {
-            patientSection.classList.remove('hidden');
-            renderPatientDashboard(user);
-        }
+        if (patientSection) patientSection.classList.remove('hidden');
+        if (appSection) appSection.classList.add('hidden');
+        await loadPatientDashboard();
     }
-
-    if (userBadge) {
-        if (user) {
-            userBadge.classList.remove('hidden');
-            const roleBadge = `<span class="role-badge">${role || 'user'}</span>`;
-            if (userNameEl) userNameEl.innerHTML = (user.name || user.full_name || 'Member') + roleBadge;
-        } else {
-            userBadge.classList.add('hidden');
-        }
-    }
-    if (logoutBtn) {
-        if (user) logoutBtn.classList.remove('hidden');
-        else      logoutBtn.classList.add('hidden');
-    }
-}
-
-function renderPatientDashboard(user) {
-    const grid = document.getElementById('patientInfoGrid');
-    if (!grid) return;
-    grid.innerHTML = '';
-    const items = [
-        { label: 'Patient ID',   value: user.user_id  || '—' },
-        { label: 'Name',         value: user.name || user.full_name || '—' },
-        { label: 'Mobile',       value: user.mobile   || '—' },
-        { label: 'Account Type', value: 'Patient' },
-    ];
-    items.forEach(({ label, value }) => {
-        const div = document.createElement('div');
-        div.className = 'patient-info-item';
-        div.innerHTML = `<div class="pi-label">${label}</div><div class="pi-value">${value}</div>`;
-        grid.appendChild(div);
-    });
-}
-
-async function checkAPIStatus() {
-    try {
-        const response = await fetch(`${API_BASE}/health`);
-        const data = await response.json();
-        const online = data.status === 'healthy' && data.model_loaded;
-        updateStatusBadge(online ? 'Model ready' : 'Model loading', online);
-    } catch (err) {
-        updateStatusBadge('API offline', false);
-    }
-}
-
-function updateStatusBadge(text, online) {
-    const statusDot  = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    if (statusDot) {
-        statusDot.style.background  = online ? '#34d399' : '#f87171';
-        statusDot.style.boxShadow   = online ? '0 0 0 4px rgba(52,211,153,.25)' : '0 0 0 4px rgba(248,113,113,.25)';
-    }
-    if (statusText) statusText.textContent = text;
-}
-
-// ── OTP helper ────────────────────────────────────────────────
-
-async function sendOtp(context) {
-    const mobileId  = context === 'dr' ? 'drMobile' : context === 'pt' ? 'ptMobile' : 'forgotMobile';
-    const otpGroupId= context === 'dr' ? 'drOtpGroup' : context === 'pt' ? 'ptOtpGroup' : 'forgotOtpGroup';
-    const hintId    = context === 'dr' ? 'drOtpHint' : context === 'pt' ? 'ptOtpHint' : 'forgotOtpHint';
-    const btnId     = context === 'dr' ? 'sendOtpDrBtn' : context === 'pt' ? 'sendOtpPtBtn' : 'sendOtpForgotBtn';
-
-    const mobile  = (document.getElementById(mobileId) || {}).value || '';
-    if (!mobile || mobile.trim().length < MIN_MOBILE_LENGTH) {
-        showAuthError('Please enter a valid mobile number before sending OTP.');
-        return;
-    }
-
-    const btn = document.getElementById(btnId);
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
-    hideAuthError();
-
-    try {
-        const result = await apiFetch('/send-otp', {
-            method: 'POST',
-            body: JSON.stringify({ mobile: mobile.trim() }),
-        });
-
-        const otpGroup = document.getElementById(otpGroupId);
-        if (otpGroup) otpGroup.classList.remove('hidden');
-
-        const hint = document.getElementById(hintId);
-        if (hint) {
-            // otp_demo is returned for development/demo purposes
-            hint.textContent = result.otp_demo
-                ? `OTP sent (demo: ${result.otp_demo})`
-                : 'OTP sent to your mobile number.';
-        }
-
-        // Start countdown on button
-        if (btn) {
-            btn.textContent = `Resend (${Math.floor(OTP_COUNTDOWN_SECONDS / 60)}:00)`;
-            let remaining = OTP_COUNTDOWN_SECONDS;
-            const countdown = setInterval(() => {
-                remaining--;
-                if (remaining <= 0) {
-                    clearInterval(countdown);
-                    btn.disabled = false;
-                    btn.textContent = 'Resend OTP';
-                } else {
-                    const m = String(Math.floor(remaining / 60)).padStart(1, '0');
-                    const s = String(remaining % 60).padStart(2, '0');
-                    btn.textContent = `Resend (${m}:${s})`;
-                }
-            }, 1000);
-        }
-    } catch (err) {
-        showAuthError(err.message || 'Failed to send OTP.');
-        if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
-    }
-}
-
-// ── Login ──────────────────────────────────────────────────────
-
-async function login() {
-    hideAuthError();
-
-    const userId   = (document.getElementById('loginId')       || {}).value || '';
-    const name     = (document.getElementById('loginName')     || {}).value || '';
-    const password = (document.getElementById('loginPassword') || {}).value || '';
-
-    if (!userId || !name || !password) {
-        showAuthError('Please fill in all fields: ID, Name, and Password.');
-        return;
-    }
-
-    showGlobalLoader('Signing in…');
-    try {
-        const result = await apiFetch('/login', {
-            method: 'POST',
-            body: JSON.stringify({ user_id: userId.trim(), name: name.trim(), password }),
-        });
-        setToken(result.access_token);
-        const user = await fetchMe();
-        showApp(user);
-    } catch (err) {
-        showAuthError(err.message || 'Login failed.');
-    } finally {
-        hideGlobalLoader();
-    }
-}
-
-// ── Register ───────────────────────────────────────────────────
-
-async function registerDoctor() {
-    hideAuthError();
-
-    const name     = (document.getElementById('drName')     || {}).value || '';
-    const dept     = (document.getElementById('drDept')     || {}).value || '';
-    const mobile   = (document.getElementById('drMobile')   || {}).value || '';
-    const otp      = (document.getElementById('drOtp')      || {}).value || '';
-    const password = (document.getElementById('drPassword') || {}).value || '';
-
-    if (!name || !dept || !mobile || !otp || !password) {
-        showAuthError('Please fill in all fields and verify your OTP.');
-        return;
-    }
-
-    showGlobalLoader('Creating doctor account…');
-    try {
-        const result = await apiFetch('/register', {
-            method: 'POST',
-            body: JSON.stringify({ role: 'doctor', name: name.trim(), department: dept.trim(), mobile: mobile.trim(), otp: otp.trim(), password }),
-        });
-        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
-        if (authRegisterHintText) authRegisterHintText.textContent = result.message || `Your Doctor ID is: ${result.user_id}`;
-        setToken(result.access_token);
-        const user = await fetchMe();
-        showApp(user);
-    } catch (err) {
-        showAuthError(err.message || 'Registration failed.');
-    } finally {
-        hideGlobalLoader();
-    }
-}
-
-async function registerPatient() {
-    hideAuthError();
-
-    const name     = (document.getElementById('ptName')     || {}).value || '';
-    const mobile   = (document.getElementById('ptMobile')   || {}).value || '';
-    const otp      = (document.getElementById('ptOtp')      || {}).value || '';
-    const password = (document.getElementById('ptPassword') || {}).value || '';
-
-    if (!name || !mobile || !otp || !password) {
-        showAuthError('Please fill in all fields and verify your OTP.');
-        return;
-    }
-
-    showGlobalLoader('Creating patient account…');
-    try {
-        const result = await apiFetch('/register', {
-            method: 'POST',
-            body: JSON.stringify({ role: 'patient', name: name.trim(), mobile: mobile.trim(), otp: otp.trim(), password }),
-        });
-        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
-        if (authRegisterHintText) authRegisterHintText.textContent = result.message || `Your Patient ID is: ${result.user_id}`;
-        setToken(result.access_token);
-        const user = await fetchMe();
-        showApp(user);
-    } catch (err) {
-        showAuthError(err.message || 'Registration failed.');
-    } finally {
-        hideGlobalLoader();
-    }
-}
-
-// ── Forgot Password ────────────────────────────────────────────
-
-async function forgotPassword() {
-    hideAuthError();
-
-    const mobile   = (document.getElementById('forgotMobile') || {}).value || '';
-    const otp      = (document.getElementById('forgotOtp')    || {}).value || '';
-    const newPwd   = (document.getElementById('forgotNewPwd') || {}).value || '';
-
-    if (!mobile || !otp || !newPwd) {
-        showAuthError('Please fill in all fields and verify your OTP.');
-        return;
-    }
-
-    showGlobalLoader('Resetting password…');
-    try {
-        const result = await apiFetch('/forgot-password', {
-            method: 'POST',
-            body: JSON.stringify({ mobile: mobile.trim(), otp: otp.trim(), new_password: newPwd }),
-        });
-        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
-        if (authRegisterHintText) authRegisterHintText.textContent = result.message || 'Password reset successful!';
-        // Switch to login tab
-        const tabLogin = document.getElementById('tabLogin');
-        if (tabLogin) tabLogin.click();
-    } catch (err) {
-        showAuthError(err.message || 'Password reset failed.');
-    } finally {
-        hideGlobalLoader();
-    }
-}
-
-async function logout() {
-    showGlobalLoader('Signing out…');
-    try {
-        await apiFetch('/logout', { method: 'POST' });
-    } catch (_) {
-        // ignore
-    } finally {
-        hideGlobalLoader();
-    }
-    clearToken();
-    showAuth();
-}
-
-async function fetchMe() {
-    return apiFetch('/me', { method: 'GET' });
 }
 
 function showAuthError(message) {
     if (!authError) return;
     authError.style.display = 'flex';
-    authError.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+    authError.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${escapeHtml(message)}`;
 }
 
 function hideAuthError() {
@@ -578,171 +132,834 @@ function hideAuthError() {
 }
 
 async function apiFetch(path, options = {}) {
-    const url = `${API_BASE}${path}`;
     const headers = {
-        'Content-Type': 'application/json',
         ...authHeaders(),
         ...(options.headers || {}),
     };
-
-    const response = await fetch(url, { ...options, headers });
-    const data = await response.json();
-
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    if (!isFormData && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+    }
+    const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
     if (!response.ok) {
         throw new Error(data.detail || data.message || 'Request failed');
     }
-
     return data;
 }
 
-function setupEventListeners() {
-    const uploadZone = document.getElementById('uploadZone');
-    const fileInput = document.getElementById('fileInput');
-
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files[0]) handleFile(e.target.files[0]);
-    });
-
-    uploadZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadZone.classList.add('dragover');
-    });
-
-    uploadZone.addEventListener('dragleave', () => {
-        uploadZone.classList.remove('dragover');
-    });
-
-    uploadZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadZone.classList.remove('dragover');
-        if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
-    });
-
-    uploadZone.addEventListener('click', () => fileInput.click());
+async function fetchMe() {
+    return apiFetch('/me', { method: 'GET' });
 }
 
-function handleFile(file) {
-    if (!file.type.startsWith('image/')) {
-        showError('Please select a valid image file.');
+function updateStatusBadge(text, online) {
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    if (statusDot) {
+        statusDot.style.background = online ? '#34d399' : '#f87171';
+        statusDot.style.boxShadow = online ? '0 0 0 4px rgba(52,211,153,.25)' : '0 0 0 4px rgba(248,113,113,.25)';
+    }
+    if (statusText) statusText.textContent = text;
+}
+
+async function checkAPIStatus() {
+    try {
+        const result = await apiFetch('/health', { method: 'GET', headers: {} });
+        updateStatusBadge(result.model_loaded ? 'Model ready' : 'Model loading', !!result.model_loaded);
+    } catch (_) {
+        updateStatusBadge('API offline', false);
+    }
+}
+
+async function sendOtp(context) {
+    const mobileId = context === 'dr' ? 'drMobile' : context === 'pt' ? 'ptMobile' : 'forgotMobile';
+    const otpGroupId = context === 'dr' ? 'drOtpGroup' : context === 'pt' ? 'ptOtpGroup' : 'forgotOtpGroup';
+    const hintId = context === 'dr' ? 'drOtpHint' : context === 'pt' ? 'ptOtpHint' : 'forgotOtpHint';
+    const btnId = context === 'dr' ? 'sendOtpDrBtn' : context === 'pt' ? 'sendOtpPtBtn' : 'sendOtpForgotBtn';
+    const mobile = (document.getElementById(mobileId)?.value || '').trim();
+    if (mobile.length < MIN_MOBILE_LENGTH) {
+        showAuthError('Please enter a valid mobile number before sending OTP.');
         return;
     }
 
-    currentFile = file;
-    showImagePreview(file);
-    analyzeImage();
-}
-
-function showImagePreview(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const previewImg = document.getElementById('previewImg');
-        const imagePreview = document.getElementById('imagePreview');
-        previewImg.src = e.target.result;
-        imagePreview.style.display = 'block';
-    };
-    reader.readAsDataURL(file);
-}
-
-async function analyzeImage() {
-    if (!currentFile || isAnalyzing) return;
-    isAnalyzing = true;
-    showLoading();
-    showGlobalLoader('Analyzing image…');
+    const btn = document.getElementById(btnId);
+    hideAuthError();
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+    }
 
     try {
-        const formData = new FormData();
-        formData.append('file', currentFile);
-        const response = await fetch(`${API_BASE}/predict`, {
+        const result = await apiFetch('/send-otp', {
             method: 'POST',
-            headers: authHeaders(),
-            body: formData,
+            body: JSON.stringify({ mobile }),
         });
-
-        const result = await response.json();
-        if (!response.ok) {
-            throw new Error(result.detail || 'Analysis failed');
+        document.getElementById(otpGroupId)?.classList.remove('hidden');
+        const hint = document.getElementById(hintId);
+        if (hint) {
+            hint.textContent = result.otp_demo ? `OTP sent (demo: ${result.otp_demo})` : 'OTP sent.';
         }
-
-        showResults(result);
-    } catch (err) {
-        showError(err.message || 'Network error. Please check your connection.');
-    } finally {
-        isAnalyzing = false;
-        hideGlobalLoader();
+        if (btn) {
+            let remaining = OTP_COUNTDOWN_SECONDS;
+            btn.textContent = `Resend (${Math.floor(remaining / 60)}:00)`;
+            const timer = setInterval(() => {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    btn.textContent = 'Resend OTP';
+                    return;
+                }
+                const mins = Math.floor(remaining / 60);
+                const secs = String(remaining % 60).padStart(2, '0');
+                btn.textContent = `Resend (${mins}:${secs})`;
+            }, 1000);
+        }
+    } catch (error) {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Send OTP';
+        }
+        showAuthError(error.message || 'Failed to send OTP.');
     }
 }
 
-function showLoading() {
-    const resultsContent = document.getElementById('resultsContent');
-    resultsContent.innerHTML = `
-        <div class="loading">
-            <i class="fas fa-spinner"></i>
-            <p style="color: #0f172a; font-size: 1.1rem; margin-top: 10px;">
-                Analyzing retinal image...
-            </p>
-            <p style="color: rgba(15, 23, 42, 0.65); font-size: 0.9rem; margin-top: 8px;">
-                Powered by ONNX and MediSight AI pipeline.
-            </p>
-        </div>
-    `;
+async function login() {
+    hideAuthError();
+    const user_id = (document.getElementById('loginId')?.value || '').trim();
+    const name = (document.getElementById('loginName')?.value || '').trim();
+    const password = document.getElementById('loginPassword')?.value || '';
+    if (!user_id || !name || !password) {
+        showAuthError('Please fill in all fields: ID, Name, and Password.');
+        return;
+    }
+    try {
+        const result = await apiFetch('/login', {
+            method: 'POST',
+            body: JSON.stringify({ user_id, name, password }),
+        });
+        setToken(result.access_token);
+        const user = await fetchMe();
+        await showApp(user);
+    } catch (error) {
+        showAuthError(error.message || 'Login failed.');
+    }
 }
 
-function showResults(result) {
-    const resultsContent = document.getElementById('resultsContent');
+async function registerDoctor() {
+    hideAuthError();
+    const payload = {
+        role: 'doctor',
+        name: (document.getElementById('drName')?.value || '').trim(),
+        department: (document.getElementById('drDept')?.value || '').trim(),
+        mobile: (document.getElementById('drMobile')?.value || '').trim(),
+        otp: (document.getElementById('drOtp')?.value || '').trim(),
+        password: document.getElementById('drPassword')?.value || '',
+    };
+    if (!payload.name || !payload.department || !payload.mobile || !payload.otp || !payload.password) {
+        showAuthError('Please fill in all fields and verify your OTP.');
+        return;
+    }
+    try {
+        const result = await apiFetch('/register', { method: 'POST', body: JSON.stringify(payload) });
+        setToken(result.access_token);
+        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
+        if (authRegisterHintText) authRegisterHintText.textContent = result.message || `Doctor ID: ${result.user_id}`;
+        await showApp(await fetchMe());
+    } catch (error) {
+        showAuthError(error.message || 'Registration failed.');
+    }
+}
 
-    resultsContent.innerHTML = `
-        <div class="prediction-card">
-            <div class="prediction-class">
-                <i class="fas fa-diagnoses"></i> ${result.predicted_class_name}
-            </div>
-            <div class="confidence">
-                Confidence: ${result.confidence}%
-            </div>
-        </div>
+async function registerPatient() {
+    hideAuthError();
+    const payload = {
+        role: 'patient',
+        name: (document.getElementById('ptName')?.value || '').trim(),
+        mobile: (document.getElementById('ptMobile')?.value || '').trim(),
+        otp: (document.getElementById('ptOtp')?.value || '').trim(),
+        password: document.getElementById('ptPassword')?.value || '',
+    };
+    if (!payload.name || !payload.mobile || !payload.otp || !payload.password) {
+        showAuthError('Please fill in all fields and verify your OTP.');
+        return;
+    }
+    try {
+        const result = await apiFetch('/register', { method: 'POST', body: JSON.stringify(payload) });
+        setToken(result.access_token);
+        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
+        if (authRegisterHintText) authRegisterHintText.textContent = result.message || `Patient ID: ${result.user_id}`;
+        await showApp(await fetchMe());
+    } catch (error) {
+        showAuthError(error.message || 'Registration failed.');
+    }
+}
 
-        <div class="info-card">
-            <h4><i class="fas fa-info-circle"></i> Severity Assessment</h4>
-            <p>${result.severity_level}</p>
-        </div>
+async function forgotPassword() {
+    hideAuthError();
+    const payload = {
+        mobile: (document.getElementById('forgotMobile')?.value || '').trim(),
+        otp: (document.getElementById('forgotOtp')?.value || '').trim(),
+        new_password: document.getElementById('forgotNewPwd')?.value || '',
+    };
+    if (!payload.mobile || !payload.otp || !payload.new_password) {
+        showAuthError('Please fill in all fields and verify your OTP.');
+        return;
+    }
+    try {
+        const result = await apiFetch('/forgot-password', { method: 'POST', body: JSON.stringify(payload) });
+        if (authRegisterHint) authRegisterHint.classList.remove('hidden');
+        if (authRegisterHintText) authRegisterHintText.textContent = result.message || 'Password reset successful.';
+        document.getElementById('tabLogin')?.click();
+    } catch (error) {
+        showAuthError(error.message || 'Password reset failed.');
+    }
+}
 
-        <div class="info-card recommendations">
-            <h4><i class="fas fa-notes-medical"></i> Medical Recommendations</h4>
-            <ul>
-                ${result.recommendations.map((rec) => `<li>${rec}</li>`).join('')}
-            </ul>
-        </div>
+async function logout() {
+    try {
+        await apiFetch('/logout', { method: 'POST' });
+    } catch (_) {
+        // ignore logout errors on expired sessions
+    }
+    clearToken();
+    currentUser = null;
+    patientDashboardData = null;
+    doctorDashboardData = null;
+    showAuth();
+}
 
-        <div class="probability-bars">
-            <h4 style="color: #0f172a; margin-bottom: 15px;">
-                <i class="fas fa-chart-bar"></i> Probability Dashboard
-            </h4>
-            ${Object.entries(result.all_probabilities)
-                .sort((a, b) => b[1] - a[1])
-                .map(
-                    ([name, prob]) => `
-                        <div class="probability-item">
-                            <span class="probability-label">${name}</span>
-                            <div class="probability-bar">
-                                <div class="probability-fill" style="width: ${prob}%"></div>
-                            </div>
-                            <span class="probability-value">${prob}%</span>
+function setupAuthTabs() {
+    const tabLogin = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const tabForgot = document.getElementById('tabForgot');
+    const loginPanel = document.getElementById('loginPanel');
+    const registerPanel = document.getElementById('registerPanel');
+    const forgotPanel = document.getElementById('forgotPanel');
+
+    function showPanel(name) {
+        [loginPanel, registerPanel, forgotPanel].forEach((panel) => panel?.classList.add('hidden'));
+        [tabLogin, tabRegister, tabForgot].forEach((tab) => tab?.classList.remove('active'));
+        if (name === 'login') {
+            loginPanel?.classList.remove('hidden');
+            tabLogin?.classList.add('active');
+        }
+        if (name === 'register') {
+            registerPanel?.classList.remove('hidden');
+            tabRegister?.classList.add('active');
+        }
+        if (name === 'forgot') {
+            forgotPanel?.classList.remove('hidden');
+            tabForgot?.classList.add('active');
+        }
+        hideAuthError();
+    }
+
+    tabLogin?.addEventListener('click', () => showPanel('login'));
+    tabRegister?.addEventListener('click', () => showPanel('register'));
+    tabForgot?.addEventListener('click', () => showPanel('forgot'));
+
+    const tabDoctorReg = document.getElementById('tabDoctorReg');
+    const tabPatientReg = document.getElementById('tabPatientReg');
+    const doctorRegPanel = document.getElementById('doctorRegPanel');
+    const patientRegPanel = document.getElementById('patientRegPanel');
+
+    tabDoctorReg?.addEventListener('click', () => {
+        doctorRegPanel?.classList.remove('hidden');
+        patientRegPanel?.classList.add('hidden');
+        tabDoctorReg.classList.add('active');
+        tabPatientReg?.classList.remove('active');
+    });
+
+    tabPatientReg?.addEventListener('click', () => {
+        patientRegPanel?.classList.remove('hidden');
+        doctorRegPanel?.classList.add('hidden');
+        tabPatientReg.classList.add('active');
+        tabDoctorReg?.classList.remove('active');
+    });
+}
+
+async function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
+}
+
+function profileHeaderMarkup(title, user, extras = []) {
+    return `
+        <div class="profile-card">
+            <div class="profile-head">
+                <div class="profile-summary">
+                    ${avatarMarkup(user, title === 'Doctor Dashboard')}
+                    <div>
+                        <h2>${escapeHtml(title)}</h2>
+                        <p><strong>${escapeHtml(user.name || '')}</strong></p>
+                        <div class="meta-list">
+                            <span class="meta-pill"><i class="fas fa-id-card"></i> ID ${escapeHtml(user.user_id || '')}</span>
+                            ${extras.join('')}
                         </div>
-                    `
-                )
-                .join('')}
+                    </div>
+                </div>
+            </div>
+            ${title === 'Doctor Dashboard' ? `
+                <div id="doctorProfilePanel" class="${doctorProfileOpen ? '' : 'hidden'}" style="margin-top:16px;">
+                    <form id="doctorFeeForm" class="inline-form">
+                        <label for="doctorFeeInput">Consultation fee</label>
+                        <div class="row-between">
+                            <input id="doctorFeeInput" type="number" min="1" step="0.01" value="${escapeHtml(user.fees || 1)}">
+                            <button class="action-btn" type="submit">Save fee</button>
+                        </div>
+                        <p class="muted tiny">Default doctor fee is ₹1.00 and can be changed here.</p>
+                    </form>
+                </div>` : ''}
         </div>
     `;
 }
 
-function showError(message) {
-    const resultsContent = document.getElementById('resultsContent');
-    resultsContent.innerHTML = `
-        <div class="message message--error">
-            <i class="fas fa-exclamation-triangle"></i>
-            ${message}
+function renderPatientDashboard() {
+    if (!patientDashboardRoot || !currentUser || !patientDashboardData) return;
+    const patient = patientDashboardData.patient || currentUser;
+    const reports = patientDashboardData.reports || [];
+    const appointments = patientDashboardData.appointments || [];
+    const importantReports = patientDashboardData.important_reports || [];
+    const filteredDoctors = doctorDirectory.filter((doctor) => {
+        const q = patientDoctorSearch.trim().toLowerCase();
+        if (!q) return true;
+        return [doctor.name, doctor.user_id, doctor.department].some((value) => String(value || '').toLowerCase().includes(q));
+    });
+    const selectedDoctorName = getSelectedDoctorName();
+
+    patientDashboardRoot.innerHTML = `
+        <div class="dashboard-topbar">
+            ${profileHeaderMarkup('Patient Dashboard', patient, [
+                `<span class="meta-pill"><i class="fas fa-phone"></i> ${escapeHtml(patient.mobile || '—')}</span>`
+            ])}
+            <div class="section-card">
+                <div class="section-head">
+                    <h3><i class="fas fa-user-doctor"></i> Doctors</h3>
+                    <span class="muted tiny">Search before sending</span>
+                </div>
+                <div class="inline-form" style="margin-top:14px;">
+                    <input id="patientDoctorSearch" type="text" placeholder="Search by doctor ID, name, or department" value="${escapeHtml(patientDoctorSearch)}">
+                    <div class="list-stack" id="patientDoctorList">
+                        ${filteredDoctors.map((doctor) => `
+                            <button type="button" class="list-item-card ${selectedPatientDoctorId === doctor.user_id ? 'active' : ''}" data-doctor-select="${escapeHtml(doctor.user_id)}">
+                                <div class="row-between">
+                                    <div class="profile-summary">
+                                        ${avatarMarkup(doctor)}
+                                        <div style="text-align:left;">
+                                            <strong>${escapeHtml(doctor.name)}</strong>
+                                            <div class="muted tiny">ID ${escapeHtml(doctor.user_id)} • ${escapeHtml(doctor.department || 'General')}</div>
+                                        </div>
+                                    </div>
+                                    <span class="chip">Fee ${escapeHtml(formatCurrency(doctor.fees))}</span>
+                                </div>
+                            </button>
+                        `).join('') || '<div class="empty-state">No doctors matched your search.</div>'}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div>
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-paper-plane"></i> Send image and note to doctor</h3>
+                        <span class="muted tiny">Doctor selection is required</span>
+                    </div>
+                    <form id="patientSubmissionForm" class="inline-form" style="margin-top:14px;">
+                        <div class="muted tiny">Selected doctor: <strong>${escapeHtml(selectedDoctorName)}</strong></div>
+                        <textarea id="patientNoteInput" rows="4" placeholder="Describe your current problem or note for the doctor"></textarea>
+                        <input id="patientImageInput" type="file" accept="image/*">
+                        <button class="action-btn" type="submit">Send to doctor</button>
+                    </form>
+                </div>
+
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-inbox"></i> Reports, treatments and suggestions</h3>
+                        <span class="muted tiny">Loaded automatically by patient ID and date</span>
+                    </div>
+                    <div class="list-stack" style="margin-top:14px;">
+                        ${reports.map((report) => `
+                            <div class="list-item-card">
+                                <div class="row-between">
+                                    <div>
+                                        <strong>${escapeHtml(report.doctor_name)}</strong>
+                                        <div class="muted tiny">${escapeHtml(formatDateTime(report.sent_at))}</div>
+                                    </div>
+                                    <div class="chip-row">
+                                        <span class="severity-pill ${escapeHtml(report.severity || 'normal')}">${escapeHtml((report.severity || 'normal').toUpperCase())}</span>
+                                        <button type="button" class="ghost-btn" data-important-toggle="${escapeHtml(report.report_id)}">${report.important ? 'Marked important' : 'Mark important'}</button>
+                                    </div>
+                                </div>
+                                <p style="margin-top:12px;"><strong>Report summary:</strong> ${escapeHtml(report.report_summary || '—')}</p>
+                                <p style="margin-top:8px;"><strong>Note:</strong> ${escapeHtml(report.note || '—')}</p>
+                                <div class="two-col" style="margin-top:12px;">
+                                    <div>
+                                        <strong>Treatments</strong>
+                                        ${toListMarkup(report.treatments)}
+                                    </div>
+                                    <div>
+                                        <strong>Suggestions</strong>
+                                        ${toListMarkup(report.suggestions)}
+                                    </div>
+                                </div>
+                                <div class="meta-list" style="margin-top:12px;">
+                                    <span class="meta-pill"><i class="fas fa-calendar"></i> Appointment ${escapeHtml(formatDate(report.appointment?.appointment_date))}</span>
+                                    <span class="meta-pill"><i class="fas fa-stethoscope"></i> Fee ${escapeHtml(formatCurrency(report.doctor_fee || 1))}</span>
+                                </div>
+                            </div>
+                        `).join('') || '<div class="empty-state">No reports received yet.</div>'}
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-card">
+                    <details open>
+                        <summary><i class="fas fa-bell"></i> Important messages (${importantReports.length})</summary>
+                        <div class="list-stack" style="margin-top:14px;">
+                            ${importantReports.map((report) => `
+                                <div class="list-item-card">
+                                    <strong>${escapeHtml(report.doctor_name)}</strong>
+                                    <div class="muted tiny">${escapeHtml(formatDateTime(report.sent_at))}</div>
+                                    <p style="margin-top:8px;">${escapeHtml(report.report_summary || report.note || 'Important doctor update')}</p>
+                                </div>
+                            `).join('') || '<div class="empty-state">No important messages yet.</div>'}
+                        </div>
+                    </details>
+                </div>
+
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-calendar-check"></i> Appointments</h3>
+                        <span class="muted tiny">Date-wise updates</span>
+                    </div>
+                    <div class="list-stack" style="margin-top:14px;">
+                        ${appointments.map((appointment) => `
+                            <div class="list-item-card">
+                                <div class="row-between">
+                                    <strong>${escapeHtml(formatDate(appointment.appointment_date))}</strong>
+                                    <span class="severity-pill ${escapeHtml(appointment.appointment_type || 'normal')}">${escapeHtml((appointment.appointment_type || 'normal').toUpperCase())}</span>
+                                </div>
+                                <div class="muted tiny" style="margin-top:8px;">Doctor ${escapeHtml(appointment.doctor_name)} • Slot ${escapeHtml(appointment.slot_number || 0)}</div>
+                                <p style="margin-top:8px;">${escapeHtml(appointment.summary || '')}</p>
+                            </div>
+                        `).join('') || '<div class="empty-state">No appointments booked yet.</div>'}
+                    </div>
+                </div>
+            </div>
         </div>
     `;
+
+    document.getElementById('patientDoctorSearch')?.addEventListener('input', (event) => {
+        patientDoctorSearch = event.target.value;
+        renderPatientDashboard();
+    });
+    patientDashboardRoot.querySelectorAll('[data-doctor-select]').forEach((button) => {
+        button.addEventListener('click', () => {
+            selectedPatientDoctorId = button.getAttribute('data-doctor-select') || '';
+            renderPatientDashboard();
+        });
+    });
+    document.getElementById('patientSubmissionForm')?.addEventListener('submit', submitPatientSubmission);
+    patientDashboardRoot.querySelectorAll('[data-important-toggle]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const reportId = button.getAttribute('data-important-toggle');
+            const report = reports.find((item) => item.report_id === reportId);
+            if (!report) return;
+            await apiFetch(`/patient/reports/${reportId}/importance`, {
+                method: 'POST',
+                body: JSON.stringify({ report_id: reportId, important: !report.important }),
+            });
+            await loadPatientDashboard();
+        });
+    });
 }
+
+function groupAppointments(appointments) {
+    return appointments.reduce((groups, appointment) => {
+        const key = appointment.appointment_date || 'Undated';
+        groups[key] = groups[key] || [];
+        groups[key].push(appointment);
+        return groups;
+    }, {});
+}
+
+function renderDoctorDashboard() {
+    if (!doctorDashboardRoot || !currentUser || !doctorDashboardData) return;
+    const doctor = doctorDashboardData.doctor || currentUser;
+    const patientMessages = doctorDashboardData.patient_messages || [];
+    const doctorChats = doctorDashboardData.doctor_chats || [];
+    const appointments = doctorDashboardData.appointments || [];
+    const selectedSubmission = patientMessages.find((item) => item.submission_id === selectedSubmissionId) || patientMessages[0] || null;
+    const aiResult = selectedSubmission?.ai_result || null;
+    const defaultTreatments = getDefaultTreatments(aiResult);
+    const defaultSuggestions = getDefaultSuggestions(aiResult);
+    const activeChatId = selectedDoctorChatId || doctorChats[0]?.doctor?.user_id || '';
+    selectedDoctorChatId = activeChatId;
+    const activeChat = doctorChats.find((chat) => chat.doctor.user_id === activeChatId) || null;
+    const groupedAppointments = groupAppointments(appointments);
+
+    doctorDashboardRoot.innerHTML = `
+        <div class="dashboard-topbar">
+            ${profileHeaderMarkup('Doctor Dashboard', doctor, [
+                `<span class="meta-pill"><i class="fas fa-money-bill-wave"></i> Fee ${escapeHtml(formatCurrency(doctor.fees || 1))}</span>`,
+                `<span class="meta-pill"><i class="fas fa-building"></i> ${escapeHtml(doctor.department || 'General')}</span>`
+            ])}
+            <div class="section-card">
+                <div class="section-head">
+                    <h3><i class="fas fa-user-doctor"></i> Doctor tab</h3>
+                    <span class="muted tiny">Image, ID, name and fee</span>
+                </div>
+                <div class="list-stack" style="margin-top:14px; max-height:300px; overflow:auto;">
+                    ${doctorDirectory.filter((item) => item.user_id !== doctor.user_id).map((item) => `
+                        <button type="button" class="list-item-card ${activeChatId === item.user_id ? 'active' : ''}" data-chat-select="${escapeHtml(item.user_id)}">
+                            <div class="row-between">
+                                <div class="profile-summary">
+                                    ${avatarMarkup(item)}
+                                    <div style="text-align:left;">
+                                        <strong>${escapeHtml(item.name)}</strong>
+                                        <div class="muted tiny">ID ${escapeHtml(item.user_id)}</div>
+                                    </div>
+                                </div>
+                                <span class="chip">${escapeHtml(formatCurrency(item.fees))}</span>
+                            </div>
+                        </button>
+                    `).join('') || '<div class="empty-state">No other doctors registered yet.</div>'}
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div>
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-envelope-open-text"></i> Patient messages</h3>
+                        <span class="muted tiny">Newest retinal submissions first</span>
+                    </div>
+                    <div class="list-stack" style="margin-top:14px;">
+                        ${patientMessages.map((item) => `
+                            <button type="button" class="list-item-card ${selectedSubmission?.submission_id === item.submission_id ? 'active' : ''}" data-submission-select="${escapeHtml(item.submission_id)}">
+                                <div class="row-between">
+                                    <div style="text-align:left;">
+                                        <strong>${escapeHtml(item.patient_name)}</strong>
+                                        <div class="muted tiny">Patient ID ${escapeHtml(item.patient_id)} • ${escapeHtml(formatDateTime(item.created_at))}</div>
+                                    </div>
+                                    <span class="chip">${escapeHtml(item.status || 'new')}</span>
+                                </div>
+                                <p class="muted tiny" style="margin-top:8px;">${escapeHtml(item.note || 'Image shared for doctor review.')}</p>
+                            </button>
+                        `).join('') || '<div class="empty-state">No patient messages received yet.</div>'}
+                    </div>
+                </div>
+
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-comments"></i> Doctor chat</h3>
+                        <span class="muted tiny">Date-wise conversation</span>
+                    </div>
+                    ${activeChat ? `
+                        <div class="list-stack" style="margin-top:14px; max-height:300px; overflow:auto;">
+                            ${activeChat.messages.map((message) => `
+                                <div class="list-item-card ${message.from_doctor_id === doctor.user_id ? 'active' : ''}">
+                                    <strong>${escapeHtml(message.from_doctor_name)}</strong>
+                                    <div class="muted tiny">${escapeHtml(formatDateTime(message.created_at))}</div>
+                                    <p style="margin-top:8px;">${escapeHtml(message.message)}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <form id="doctorChatForm" class="inline-form" style="margin-top:14px;">
+                            <textarea id="doctorChatMessage" rows="3" placeholder="Send a message to ${escapeHtml(activeChat.doctor.name)}"></textarea>
+                            <button class="action-btn" type="submit">Send message</button>
+                        </form>
+                    ` : '<div class="empty-state" style="margin-top:14px;">Select a doctor from the doctor tab to start chatting.</div>'}
+                </div>
+            </div>
+
+            <div>
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-file-medical"></i> Selected patient case</h3>
+                        <span class="muted tiny">Past summary and current problem</span>
+                    </div>
+                    ${selectedSubmission ? `
+                        <div class="list-stack" style="margin-top:14px;">
+                            <div class="list-item-card">
+                                <div class="profile-summary">
+                                    ${avatarMarkup(selectedSubmission.patient_profile || {})}
+                                    <div>
+                                        <strong>${escapeHtml(selectedSubmission.patient_name)}</strong>
+                                        <div class="muted tiny">ID ${escapeHtml(selectedSubmission.patient_id)} • ${escapeHtml(selectedSubmission.patient_mobile || selectedSubmission.patient_profile?.mobile || '—')}</div>
+                                    </div>
+                                </div>
+                                <p style="margin-top:12px;"><strong>Current problem:</strong> ${escapeHtml(selectedSubmission.note || 'Retinopathy image shared')}</p>
+                                ${selectedSubmission.image_data_url ? `<img src="${escapeHtml(selectedSubmission.image_data_url)}" alt="Patient retinal upload" style="margin-top:12px; width:100%; border-radius:18px; max-height:240px; object-fit:cover;">` : ''}
+                                <div class="chip-row" style="margin-top:12px;">
+                                    <button type="button" class="ghost-btn" id="analyzeSubmissionBtn">${selectedSubmission.ai_result ? 'Refresh AI summary' : 'Analyze image with AI'}</button>
+                                </div>
+                            </div>
+                            <div class="list-item-card">
+                                <strong>Past patient summary</strong>
+                                ${selectedSubmission.patient_history?.length ? selectedSubmission.patient_history.map((report) => `
+                                    <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(0,0,0,.08);">
+                                        <div class="muted tiny">${escapeHtml(formatDateTime(report.sent_at))}</div>
+                                        <div>${escapeHtml(report.report_summary || 'Doctor update')}</div>
+                                    </div>
+                                `).join('') : '<div class="empty-state">No past summary available.</div>'}
+                            </div>
+                            <form id="doctorReportForm" class="list-item-card inline-form">
+                                <strong>Appointments, treatments, suggestions and report</strong>
+                                <textarea id="reportSummaryInput" rows="3" placeholder="Report summary">${escapeHtml((aiResult && aiResult.diagnosis) || selectedSubmission.report_summary || '')}</textarea>
+                                <textarea id="doctorNoteInput" rows="3" placeholder="Doctor note">${escapeHtml(selectedSubmission.note || '')}</textarea>
+                                <textarea id="treatmentsInput" rows="3" placeholder="Treatments (one per line)">${escapeHtml(defaultTreatments.join('\n'))}</textarea>
+                                <textarea id="suggestionsInput" rows="4" placeholder="Suggestions (one per line)">${escapeHtml(defaultSuggestions.join('\n'))}</textarea>
+                                <div class="two-col">
+                                    <select id="severityInput">
+                                        <option value="normal" ${!aiResult || aiResult.predicted_class_name !== 'DR' ? 'selected' : ''}>Normal</option>
+                                        <option value="serious" ${aiResult && aiResult.predicted_class_name === 'DR' ? 'selected' : ''}>Serious</option>
+                                    </select>
+                                    <input id="appointmentDateInput" type="date" placeholder="Optional manual appointment date">
+                                </div>
+                                <button class="action-btn" type="submit">Send to patient</button>
+                            </form>
+                        </div>
+                    ` : '<div class="empty-state" style="margin-top:14px;">Select a patient message to review the case.</div>'}
+                </div>
+
+                <div class="section-card">
+                    <div class="section-head">
+                        <h3><i class="fas fa-calendar-days"></i> Daily appointments</h3>
+                        <span class="muted tiny">Serious and normal, date-wise</span>
+                    </div>
+                    <div style="margin-top:14px;">
+                        ${Object.keys(groupedAppointments).length ? Object.entries(groupedAppointments).map(([date, items]) => `
+                            <div class="appointment-group">
+                                <strong>${escapeHtml(formatDate(date))}</strong>
+                                <div class="list-stack" style="margin-top:10px;">
+                                    ${items.map((appointment) => `
+                                        <div class="list-item-card">
+                                            <div class="row-between">
+                                                <strong>${escapeHtml(appointment.patient_name)}</strong>
+                                                <span class="severity-pill ${escapeHtml(appointment.appointment_type || 'normal')}">${escapeHtml((appointment.appointment_type || 'normal').toUpperCase())}</span>
+                                            </div>
+                                            <div class="muted tiny" style="margin-top:8px;">Patient ID ${escapeHtml(appointment.patient_id)} • Slot ${escapeHtml(appointment.slot_number || 0)} • ${escapeHtml(appointment.patient_mobile || '—')}</div>
+                                            <p style="margin-top:8px;">${escapeHtml(appointment.summary || '')}</p>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `).join('') : '<div class="empty-state">No appointments scheduled yet.</div>'}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('doctorAvatarButton')?.addEventListener('click', () => {
+        doctorProfileOpen = !doctorProfileOpen;
+        renderDoctorDashboard();
+    });
+    document.getElementById('doctorFeeForm')?.addEventListener('submit', updateDoctorFee);
+    doctorDashboardRoot.querySelectorAll('[data-submission-select]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            selectedSubmissionId = button.getAttribute('data-submission-select') || '';
+            if (!(await analyzeSubmissionIfNeeded(selectedSubmissionId))) {
+                renderDoctorDashboard();
+            }
+        });
+    });
+    doctorDashboardRoot.querySelectorAll('[data-chat-select]').forEach((button) => {
+        button.addEventListener('click', () => {
+            selectedDoctorChatId = button.getAttribute('data-chat-select') || '';
+            renderDoctorDashboard();
+        });
+    });
+    document.getElementById('doctorChatForm')?.addEventListener('submit', sendDoctorChatMessage);
+    document.getElementById('analyzeSubmissionBtn')?.addEventListener('click', analyzeSelectedSubmission);
+    document.getElementById('doctorReportForm')?.addEventListener('submit', sendDoctorReport);
+}
+
+async function loadPatientDashboard() {
+    const [dashboard, doctors] = await Promise.all([
+        apiFetch('/patient/dashboard', { method: 'GET' }),
+        apiFetch('/doctors', { method: 'GET' }),
+    ]);
+    patientDashboardData = dashboard;
+    doctorDirectory = doctors.doctors || [];
+    if (!selectedPatientDoctorId && doctorDirectory.length) {
+        selectedPatientDoctorId = doctorDirectory[0].user_id;
+    }
+    renderPatientDashboard();
+}
+
+async function loadDoctorDashboard() {
+    const [dashboard, doctors] = await Promise.all([
+        apiFetch('/doctor/dashboard', { method: 'GET' }),
+        apiFetch('/doctors', { method: 'GET' }),
+    ]);
+    doctorDashboardData = dashboard;
+    doctorDirectory = doctors.doctors || [];
+    if (!selectedSubmissionId) {
+        selectedSubmissionId = dashboard.patient_messages?.[0]?.submission_id || '';
+    }
+    if (!selectedDoctorChatId) {
+        selectedDoctorChatId = dashboard.doctor_chats?.[0]?.doctor?.user_id || '';
+    }
+    if (selectedSubmissionId) {
+        const submission = dashboard.patient_messages?.find((item) => item.submission_id === selectedSubmissionId);
+        if (submission?.image_data_url && !submission.ai_result) {
+            await analyzeSelectedSubmission();
+            return;
+        }
+    }
+    renderDoctorDashboard();
+}
+
+async function submitPatientSubmission(event) {
+    event.preventDefault();
+    if (!selectedPatientDoctorId) {
+        window.alert('Please search and select a doctor before sending.');
+        return;
+    }
+    const note = (document.getElementById('patientNoteInput')?.value || '').trim();
+    const file = document.getElementById('patientImageInput')?.files?.[0] || null;
+    let image_data_url = null;
+    if (file) {
+        image_data_url = await fileToDataUrl(file);
+    }
+    if (!note && !image_data_url) {
+        window.alert('Please add a note or retinal image.');
+        return;
+    }
+    await apiFetch('/patient/submissions', {
+        method: 'POST',
+        body: JSON.stringify({
+            doctor_id: selectedPatientDoctorId,
+            note,
+            image_name: file?.name || '',
+            image_data_url,
+        }),
+    });
+    document.getElementById('patientSubmissionForm')?.reset();
+    await loadPatientDashboard();
+    window.alert('Your retinal case was sent to the selected doctor.');
+}
+
+async function updateDoctorFee(event) {
+    event.preventDefault();
+    const fee = Number(document.getElementById('doctorFeeInput')?.value || '1');
+    await apiFetch('/doctor/profile/fees', {
+        method: 'POST',
+        body: JSON.stringify({ fee }),
+    });
+    await loadDoctorDashboard();
+}
+
+async function analyzeSelectedSubmission() {
+    if (!selectedSubmissionId) return;
+    try {
+        await apiFetch(`/doctor/submissions/${selectedSubmissionId}/analyze`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+        await loadDoctorDashboard();
+    } catch (error) {
+        window.alert(error.message || 'Unable to analyze the retinal image right now.');
+        renderDoctorDashboard();
+    }
+}
+
+async function analyzeSubmissionIfNeeded(submissionId) {
+    const submission = doctorDashboardData?.patient_messages?.find((item) => item.submission_id === submissionId);
+    if (submission?.image_data_url && !submission.ai_result) {
+        await analyzeSelectedSubmission();
+        return true;
+    }
+    return false;
+}
+
+async function sendDoctorReport(event) {
+    event.preventDefault();
+    if (!selectedSubmissionId) return;
+    const report_summary = (document.getElementById('reportSummaryInput')?.value || '').trim();
+    const note = (document.getElementById('doctorNoteInput')?.value || '').trim();
+    const treatments = (document.getElementById('treatmentsInput')?.value || '').split('\n').map((item) => item.trim()).filter(Boolean);
+    const suggestions = (document.getElementById('suggestionsInput')?.value || '').split('\n').map((item) => item.trim()).filter(Boolean);
+    const severity = document.getElementById('severityInput')?.value || 'normal';
+    const appointment_date = (document.getElementById('appointmentDateInput')?.value || '').trim();
+    await apiFetch('/doctor/reports', {
+        method: 'POST',
+        body: JSON.stringify({
+            submission_id: selectedSubmissionId,
+            report_summary,
+            note,
+            treatments,
+            suggestions,
+            severity,
+            appointment_date: appointment_date || null,
+        }),
+    });
+    await loadDoctorDashboard();
+    window.alert('Doctor report sent to the patient.');
+}
+
+async function sendDoctorChatMessage(event) {
+    event.preventDefault();
+    const message = (document.getElementById('doctorChatMessage')?.value || '').trim();
+    if (!message || !selectedDoctorChatId) return;
+    await apiFetch('/doctor/messages', {
+        method: 'POST',
+        body: JSON.stringify({ doctor_id: selectedDoctorChatId, message }),
+    });
+    await loadDoctorDashboard();
+}
+
+async function init() {
+    setupAuthTabs();
+    await checkAPIStatus();
+    if (getToken()) {
+        try {
+            await showApp(await fetchMe());
+            return;
+        } catch (_) {
+            clearToken();
+        }
+    }
+    showAuth();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    init();
+    document.getElementById('sendOtpDrBtn')?.addEventListener('click', () => sendOtp('dr'));
+    document.getElementById('sendOtpPtBtn')?.addEventListener('click', () => sendOtp('pt'));
+    document.getElementById('sendOtpForgotBtn')?.addEventListener('click', () => sendOtp('forgot'));
+    document.getElementById('loginForm')?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        login();
+    });
+    document.getElementById('doctorRegForm')?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        registerDoctor();
+    });
+    document.getElementById('patientRegForm')?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        registerPatient();
+    });
+    document.getElementById('forgotForm')?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        forgotPassword();
+    });
+    logoutBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        logout();
+    });
+});
 
 setInterval(checkAPIStatus, 30000);
-setupEventListeners();
