@@ -11,10 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import numpy as np
 import io
-import os 
+import os
 import time
 import hashlib
 import secrets
+import random
 from typing import List, Optional, Dict
 import uvicorn
 import onnxruntime as ort
@@ -60,7 +61,13 @@ try:
 except Exception:
     print("Warning: Static directory not found")
 
-# Global variables
+# User ID / OTP generation constants
+USER_ID_MIN = 100000
+USER_ID_MAX = 999999
+OTP_MIN = 100000
+OTP_MAX = 999999
+MAX_ID_GENERATION_ATTEMPTS = 1000
+OTP_EXPIRY_SECONDS = 300  # 5 minutes
 onnx_session = None
 model_loaded = False
 class_names = ["DR", "No_DR"]  # 0=DR, 1=No_DR
@@ -68,7 +75,8 @@ class_names = ["DR", "No_DR"]  # 0=DR, 1=No_DR
 # Simple user/auth and payment simulation (demo purposes only)
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
 users: Dict[str, dict] = {}
-sessions: Dict[str, str] = {}  # token -> username
+sessions: Dict[str, str] = {}  # token -> user_key
+otps: Dict[str, dict] = {}     # mobile -> {otp, expires_at}
 security = HTTPBearer()
 
 class UserCreate(BaseModel):
@@ -88,6 +96,27 @@ class PaymentRequest(BaseModel):
     amount: float
     currency: str = "USD"
     plan: Optional[str] = None
+
+class SendOtpRequest(BaseModel):
+    mobile: str
+
+class RegisterRequest(BaseModel):
+    role: str           # "doctor" or "patient"
+    name: str
+    mobile: str
+    otp: str
+    password: str
+    department: Optional[str] = None  # required for doctors
+
+class LoginRequest(BaseModel):
+    user_id: str        # 6-digit numeric ID
+    name: str
+    password: str
+
+class ForgotPasswordRequest(BaseModel):
+    mobile: str
+    otp: str
+    new_password: str
 
 
 def load_onnx_model():
@@ -137,7 +166,16 @@ def _load_users() -> None:
         try:
             import json
             with open(USERS_FILE, "r", encoding="utf-8") as f:
-                users = json.load(f) or {}
+                loaded = json.load(f) or {}
+            users = {}
+            for key, u in loaded.items():
+                # Migrate legacy users to new schema
+                if "user_id" not in u:
+                    u["user_id"] = key
+                    u["name"] = u.get("full_name") or u.get("username") or key
+                    u["role"] = u.get("role", "doctor")
+                    u.setdefault("mobile", "")
+                users[key] = u
         except Exception:
             users = {}
     else:
@@ -155,22 +193,45 @@ def _save_users() -> None:
 
 
 def _create_default_user() -> None:
+    # Check if demo user already exists (keyed by user_id or username "demo")
+    if any(u.get("username") == "demo" or u.get("name") == "Demo Doctor" for u in users.values()):
+        return
     if "demo" not in users:
-        users["demo"] = {
+        demo_id = _generate_numeric_id()
+        users[demo_id] = {
+            "user_id": demo_id,
             "username": "demo",
-            "full_name": "Demo User",
+            "name": "Demo Doctor",
+            "full_name": "Demo Doctor",
+            "role": "doctor",
+            "mobile": "",
+            "department": "General",
             "password": _hash_password("demo123"),
             "created_at": time.time(),
         }
         _save_users()
 
 
+def _generate_numeric_id() -> str:
+    """Generate a unique 6-digit numeric ID."""
+    for _ in range(MAX_ID_GENERATION_ATTEMPTS):
+        id_str = str(random.randint(USER_ID_MIN, USER_ID_MAX))
+        if id_str not in users:
+            return id_str
+    raise RuntimeError("Could not generate a unique numeric ID")
+
+
+def _generate_otp() -> str:
+    """Generate a 6-digit OTP."""
+    return str(random.randint(OTP_MIN, OTP_MAX))
+
+
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     token = credentials.credentials
-    username = sessions.get(token)
-    if not username or username not in users:
+    key = sessions.get(token)
+    if not key or key not in users:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-    return users[username]
+    return users[key]
 
 
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
@@ -220,33 +281,144 @@ async def read_root():
         """)
 
 
-@app.post("/register", response_model=TokenResponse)
-async def register(user: UserCreate):
-    if user.username in users:
-        raise HTTPException(status_code=400, detail="Username already exists")
+@app.post("/send-otp")
+async def send_otp(request: SendOtpRequest):
+    """Generate and store a 6-digit OTP for the given mobile number.
+    In production this would be delivered via SMS; for this demo the OTP
+    is returned in the response body so it can be displayed on screen."""
+    if not request.mobile or len(request.mobile) < 7:
+        raise HTTPException(status_code=400, detail="Invalid mobile number")
+    otp = _generate_otp()
+    otps[request.mobile] = {
+        "otp": otp,
+        "expires_at": time.time() + OTP_EXPIRY_SECONDS,
+    }
+    return {
+        "message": f"OTP sent to {request.mobile}",
+        "otp_demo": otp,   # shown on-screen for demo; remove in production
+        "expires_in": OTP_EXPIRY_SECONDS,
+    }
 
-    users[user.username] = {
-        "username": user.username,
-        "full_name": user.full_name or user.username,
-        "password": _hash_password(user.password),
+
+@app.post("/register")
+async def register_user(request: RegisterRequest):
+    """Register a new doctor or patient."""
+    if request.role not in ("doctor", "patient"):
+        raise HTTPException(status_code=400, detail="Role must be 'doctor' or 'patient'")
+    if request.role == "doctor" and not request.department:
+        raise HTTPException(status_code=400, detail="Department is required for doctor registration")
+
+    # Verify OTP
+    stored_otp = otps.get(request.mobile)
+    if not stored_otp:
+        raise HTTPException(status_code=400, detail="OTP not found. Please request a new OTP.")
+    if stored_otp["otp"] != request.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    if time.time() > stored_otp["expires_at"]:
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
+
+    # Check for duplicate mobile
+    for u in users.values():
+        if u.get("mobile") == request.mobile:
+            raise HTTPException(status_code=400, detail="Mobile number is already registered")
+
+    # Generate unique 6-digit ID
+    user_id = _generate_numeric_id()
+
+    user_data: dict = {
+        "user_id": user_id,
+        "role": request.role,
+        "name": request.name,
+        "full_name": request.name,
+        "mobile": request.mobile,
+        "password": _hash_password(request.password),
         "created_at": time.time(),
     }
+    if request.role == "doctor":
+        user_data["department"] = request.department
+
+    users[user_id] = user_data
+    otps.pop(request.mobile, None)  # consume OTP
     _save_users()
 
     token = secrets.token_urlsafe(32)
-    sessions[token] = user.username
-    return TokenResponse(access_token=token)
+    sessions[token] = user_id
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user_id,
+        "role": request.role,
+        "message": (
+            f"Registration successful! Your {request.role.capitalize()} ID is {user_id}. "
+            f"It has been sent to {request.mobile}."
+        ),
+    }
 
 
-@app.post("/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
-    user = users.get(credentials.username)
-    if not user or not _verify_password(credentials.password, user.get("password", "")):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+@app.post("/login")
+async def login_user(credentials: LoginRequest):
+    """Login with user_id, name, and password."""
+    user = users.get(credentials.user_id)
+    # Fallback: legacy username key
+    if not user:
+        for u in users.values():
+            if u.get("username") == credentials.user_id:
+                user = u
+                break
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ID, name, or password")
 
+    # Verify name (case-insensitive)
+    stored_name = (user.get("name") or user.get("full_name") or user.get("username") or "").strip().lower()
+    if stored_name != credentials.name.strip().lower():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ID, name, or password")
+
+    if not _verify_password(credentials.password, user.get("password", "")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ID, name, or password")
+
+    key = user.get("user_id") or user.get("username")
     token = secrets.token_urlsafe(32)
-    sessions[token] = user["username"]
-    return TokenResponse(access_token=token)
+    sessions[token] = key
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": user.get("role", "patient"),
+        "user_id": user.get("user_id", key),
+    }
+
+
+@app.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Reset password using mobile OTP verification."""
+    stored_otp = otps.get(request.mobile)
+    if not stored_otp:
+        raise HTTPException(status_code=400, detail="OTP not found. Please request a new OTP.")
+    if stored_otp["otp"] != request.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    if time.time() > stored_otp["expires_at"]:
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
+
+    # Find user by mobile
+    target_user = None
+    for u in users.values():
+        if u.get("mobile") == request.mobile:
+            target_user = u
+            break
+    if not target_user:
+        raise HTTPException(status_code=404, detail="No account found with this mobile number")
+
+    target_user["password"] = _hash_password(request.new_password)
+    otps.pop(request.mobile, None)
+    _save_users()
+
+    return {
+        "message": (
+            f"Password reset successful. Your ID ({target_user['user_id']}) and new password "
+            f"have been sent to {request.mobile}."
+        ),
+        "user_id": target_user["user_id"],
+        "role": target_user.get("role", "patient"),
+    }
 
 
 @app.post("/logout")
@@ -259,8 +431,13 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
 @app.get("/me")
 async def me(current_user: dict = Depends(get_current_user)):
     return {
-        "username": current_user["username"],
-        "full_name": current_user.get("full_name"),
+        "user_id": current_user.get("user_id"),
+        "username": current_user.get("username", current_user.get("user_id")),
+        "name": current_user.get("name") or current_user.get("full_name"),
+        "full_name": current_user.get("full_name") or current_user.get("name"),
+        "role": current_user.get("role", "patient"),
+        "department": current_user.get("department"),
+        "mobile": current_user.get("mobile", ""),
     }
 
 

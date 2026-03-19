@@ -145,16 +145,11 @@
         }
 
         .status-row {
-            /* display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            margin-top: 18px; */
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 475px;
-            margin-top: -19px;
+            justify-content: space-between;
+            margin-top: 18px;
+            padding: 0 8px;
         }
 
         .status-badge {
@@ -648,6 +643,109 @@
         #fileInput {
             display: none;
         }
+
+        /* ── OTP / registration extras ─────────────────────── */
+        .auth-card {
+            width: min(460px, 94vw);
+        }
+
+        .otp-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .otp-row input {
+            flex: 1;
+        }
+
+        .otp-btn {
+            padding: 10px 14px;
+            border-radius: 14px;
+            border: none;
+            background: linear-gradient(135deg, rgba(0,120,190,1), rgba(0,180,216,.95));
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.85rem;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: opacity 0.2s;
+        }
+
+        .otp-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .otp-hint {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.82rem;
+            color: rgba(15,76,129,.85);
+            font-weight: 600;
+        }
+
+        .auth-hint {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: rgba(209,250,229,.9);
+            color: #065f46;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .auth-error {
+            display: none;
+            margin-top: 14px;
+            color: #9b2c2c;
+            font-size: 0.9rem;
+            min-height: 1.2rem;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* role badge in user badge */
+        .role-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(0,120,190,.15);
+            color: rgba(0,80,140,.9);
+            margin-left: 6px;
+            text-transform: capitalize;
+        }
+
+        /* patient dashboard */
+        .patient-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+            margin-top: 22px;
+        }
+
+        .patient-info-item {
+            background: rgba(255,255,255,.92);
+            border-radius: 16px;
+            padding: 18px 20px;
+            border: 1px solid rgba(0,0,0,.08);
+            box-shadow: 0 8px 24px rgba(0,0,0,.1);
+        }
+
+        .patient-info-item .pi-label {
+            font-size: 0.82rem;
+            color: rgba(15,20,33,.6);
+            margin-bottom: 4px;
+        }
+
+        .patient-info-item .pi-value {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-dark);
+        }
     </style>
 </head>
 <body>
@@ -672,27 +770,146 @@
 
         <div id="authSection" class="auth-section">
             <div class="auth-card" id="authCard">
-                <h2>Welcome back</h2>
+
+                <!-- Top tab bar: Login | Register | Forgot -->
                 <div class="auth-toggle">
-                    <button id="showLogin" class="auth-btn active" type="button">Login</button>
-                    <button id="showRegister" class="auth-btn" type="button">Register</button>
+                    <button id="tabLogin"    class="auth-btn active" type="button">Login</button>
+                    <button id="tabRegister" class="auth-btn"        type="button">Register</button>
+                    <button id="tabForgot"   class="auth-btn"        type="button">Forgot</button>
                 </div>
-                <form id="authForm">
-                    <div class="input-group">
-                        <label for="authUsername">Username</label>
-                        <input id="authUsername" type="text" autocomplete="username" required>
+
+                <!-- ── LOGIN PANEL ──────────────────────────── -->
+                <div id="loginPanel">
+                    <h2>Welcome back</h2>
+                    <form id="loginForm">
+                        <div class="input-group">
+                            <label for="loginId">User ID <small>(6-digit)</small></label>
+                            <input id="loginId" type="text" autocomplete="username" placeholder="e.g. 123456" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="loginName">Full Name</label>
+                            <input id="loginName" type="text" autocomplete="name" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="loginPassword">Password</label>
+                            <input id="loginPassword" type="password" autocomplete="current-password" required>
+                        </div>
+                        <button type="submit" class="submit-btn">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </button>
+                    </form>
+                </div>
+
+                <!-- ── REGISTER PANEL ────────────────────────── -->
+                <div id="registerPanel" class="hidden">
+                    <h2>Create Account</h2>
+
+                    <!-- Doctor / Patient sub-toggle -->
+                    <div class="auth-toggle" style="margin-bottom:16px">
+                        <button id="tabDoctorReg"  class="auth-btn active" type="button">
+                            <i class="fas fa-user-md"></i> Doctor
+                        </button>
+                        <button id="tabPatientReg" class="auth-btn"        type="button">
+                            <i class="fas fa-user"></i> Patient
+                        </button>
                     </div>
-                    <div class="input-group">
-                        <label for="authPassword">Password</label>
-                        <input id="authPassword" type="password" autocomplete="current-password" required>
+
+                    <!-- Doctor form -->
+                    <div id="doctorRegPanel">
+                        <form id="doctorRegForm">
+                            <div class="input-group">
+                                <label for="drName">Doctor Name</label>
+                                <input id="drName" type="text" autocomplete="name" placeholder="Dr. Full Name" required>
+                            </div>
+                            <div class="input-group">
+                                <label for="drDept">Department</label>
+                                <input id="drDept" type="text" placeholder="e.g. Ophthalmology" required>
+                            </div>
+                            <div class="input-group">
+                                <label for="drMobile">Mobile Number</label>
+                                <div class="otp-row">
+                                    <input id="drMobile" type="tel" placeholder="+91XXXXXXXXXX" required>
+                                    <button type="button" id="sendOtpDrBtn" class="otp-btn">Send OTP</button>
+                                </div>
+                            </div>
+                            <div class="input-group hidden" id="drOtpGroup">
+                                <label for="drOtp">Enter OTP</label>
+                                <input id="drOtp" type="text" maxlength="6" placeholder="6-digit OTP">
+                                <span id="drOtpHint" class="otp-hint"></span>
+                            </div>
+                            <div class="input-group">
+                                <label for="drPassword">Password</label>
+                                <input id="drPassword" type="password" required>
+                            </div>
+                            <button type="submit" class="submit-btn">
+                                <i class="fas fa-user-plus"></i> Register as Doctor
+                            </button>
+                        </form>
                     </div>
-                    <div class="input-group hidden" id="fullNameGroup">
-                        <label for="authFullName">Full name</label>
-                        <input id="authFullName" type="text" autocomplete="name">
+
+                    <!-- Patient form -->
+                    <div id="patientRegPanel" class="hidden">
+                        <form id="patientRegForm">
+                            <div class="input-group">
+                                <label for="ptName">Patient Name</label>
+                                <input id="ptName" type="text" autocomplete="name" placeholder="Full Name" required>
+                            </div>
+                            <div class="input-group">
+                                <label for="ptMobile">Mobile Number</label>
+                                <div class="otp-row">
+                                    <input id="ptMobile" type="tel" placeholder="+91XXXXXXXXXX" required>
+                                    <button type="button" id="sendOtpPtBtn" class="otp-btn">Send OTP</button>
+                                </div>
+                            </div>
+                            <div class="input-group hidden" id="ptOtpGroup">
+                                <label for="ptOtp">Enter OTP</label>
+                                <input id="ptOtp" type="text" maxlength="6" placeholder="6-digit OTP">
+                                <span id="ptOtpHint" class="otp-hint"></span>
+                            </div>
+                            <div class="input-group">
+                                <label for="ptPassword">Password</label>
+                                <input id="ptPassword" type="password" required>
+                            </div>
+                            <button type="submit" class="submit-btn">
+                                <i class="fas fa-user-plus"></i> Register as Patient
+                            </button>
+                        </form>
                     </div>
-                    <button type="submit" class="submit-btn" id="authSubmit">Continue</button>
-                    <p class="auth-error" id="authError"></p>
-                </form>
+                </div>
+
+                <!-- ── FORGOT PASSWORD PANEL ─────────────────── -->
+                <div id="forgotPanel" class="hidden">
+                    <h2>Forgot Password</h2>
+                    <form id="forgotForm">
+                        <div class="input-group">
+                            <label for="forgotMobile">Registered Mobile Number</label>
+                            <div class="otp-row">
+                                <input id="forgotMobile" type="tel" placeholder="+91XXXXXXXXXX" required>
+                                <button type="button" id="sendOtpForgotBtn" class="otp-btn">Send OTP</button>
+                            </div>
+                        </div>
+                        <div class="input-group hidden" id="forgotOtpGroup">
+                            <label for="forgotOtp">Enter OTP</label>
+                            <input id="forgotOtp" type="text" maxlength="6" placeholder="6-digit OTP">
+                            <span id="forgotOtpHint" class="otp-hint"></span>
+                        </div>
+                        <div class="input-group">
+                            <label for="forgotNewPwd">New Password</label>
+                            <input id="forgotNewPwd" type="password" required>
+                        </div>
+                        <button type="submit" class="submit-btn">
+                            <i class="fas fa-key"></i> Reset Password
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Registration success hint -->
+                <div class="auth-hint hidden" id="authRegisterHint">
+                    <i class="fas fa-check-circle"></i>
+                    <span id="authRegisterHintText">Account created! Your ID has been sent to your mobile.</span>
+                </div>
+
+                <p class="auth-error" id="authError"></p>
             </div>
         </div>
 
@@ -748,6 +965,36 @@
             <p class="footer-note">For research and educational purposes only</p>
         </div>
         </div> <!-- appSection -->
+
+        <!-- ── PATIENT DASHBOARD ──────────────────────────── -->
+        <div id="patientSection" class="app-section hidden">
+            <div class="main-grid">
+                <div class="card main-card" style="grid-column: span 2;">
+                    <h2><i class="fas fa-user-circle"></i> Patient Dashboard</h2>
+                    <div id="patientDashContent">
+                        <div class="loading">
+                            <i class="fas fa-info-circle"></i>
+                            <p class="loading-text">
+                                Welcome! Your doctor will share retinopathy analysis results here.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="patient-info-grid" id="patientInfoGrid"></div>
+                </div>
+                <div class="card info-card">
+                    <h4><i class="fas fa-lightbulb"></i> About Diabetic Retinopathy</h4>
+                    <p>Diabetic retinopathy is a diabetes complication affecting the eyes. Regular screening helps detect it early for better outcomes.</p>
+                </div>
+                <div class="card info-card">
+                    <h4><i class="fas fa-shield-alt"></i> Your Privacy</h4>
+                    <p>Your medical data is handled securely. Only authorised doctors can access your records.</p>
+                </div>
+            </div>
+            <div class="footer">
+                <p>Diabetic Retinopathy Classification System | MediSight Health</p>
+                <p class="footer-note">For research and educational purposes only</p>
+            </div>
+        </div> <!-- patientSection -->
     </div>
 
         <script src="/static/app.js"></script>
